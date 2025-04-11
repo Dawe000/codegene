@@ -5,6 +5,8 @@ import { Web3ReactProvider } from '@web3-react/core';
 import { ethers } from 'ethers';
 import Header from './components/Header';
 import { Web3Provider } from './contexts/Web3Context';
+import AuditorTabs from './components/AuditorTabs';
+import { Web3Context } from 'web3';
 
 // Function to get library from provider
 function getLibrary(provider: any): ethers.providers.Web3Provider {
@@ -35,13 +37,13 @@ const darkTheme = createTheme({
 
 function App() {
   return (
-    <Web3ReactProvider getLibrary={getLibrary as any}>
+    <Web3ReactProvider getLibrary={getLibrary}>
       <Web3Provider>
         <ThemeProvider theme={darkTheme}>
           <CssBaseline />
           <Container maxWidth="lg">
             <Header />
-            {/* We'll add more components here later */}
+            <AuditorTabs />
           </Container>
         </ThemeProvider>
       </Web3Provider>
