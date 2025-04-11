@@ -1,29 +1,40 @@
-// src/components/Header.tsx
 import React from 'react';
 import { AppBar, Toolbar, Typography, Box, Button } from '@mui/material';
+import SimpleWalletConnect from '../contexts/walletConnect';
 
 const Header = () => {
   return (
     <AppBar position="static" color="transparent" elevation={0} sx={{ mb: 4 }}>
       <Toolbar>
+        {/* Replace Shield icon with custom logo */}
         <Box sx={{ mr: 2, display: 'flex', alignItems: 'center' }}>
-          {/* You can add your logo here */}
+          <img 
+           // src="/codegene_logo.png" 
+            //alt="CodeGene Logo" 
+            style={{ height: 40 }}
+          />
         </Box>
         
+        {/* Title and Subtitle Container */}
         <Box sx={{ flexGrow: 1 }}>
           <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
-            Smart Contract Insurance
+            CodeGene
           </Typography>
           <Typography variant="subtitle1" color="text.secondary">
-            AI-Powered Analyzer with Insurance Services
+            AI-Powered Smart Contract Translator & Analyzer with insurance subscription services 
           </Typography>
+        </Box>
+
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <SimpleWalletConnect />
+          <Button>...</Button>
         </Box>
 
         <Box>
           <Button 
             variant="outlined" 
             color="primary" 
-            href="https://github.com/yourusername/your-repo" 
+            href="https://github.com/dawe000/CodeGene" 
             target="_blank"
             sx={{ mr: 2 }}
           >
@@ -32,8 +43,10 @@ const Header = () => {
           <Button 
             variant="contained" 
             color="primary"
+            href="" //link to the AI website 
+            target="_blank"
           >
-            Connect Wallet
+            Powered by ...AI
           </Button>
         </Box>
       </Toolbar>
