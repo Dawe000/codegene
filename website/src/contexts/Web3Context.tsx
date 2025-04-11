@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { ethers } from 'ethers';
 import { InjectedConnector } from '@web3-react/injected-connector';
 import { useWeb3React } from '@web3-react/core';
+import { base, baseSepolia } from 'viem/chains';
 
 // Define supported chain IDs
 const SUPPORTED_CHAIN_IDS = [1,421614, 137, 42161, 10, 8453, 84532]; // Mainnet, Sepolia, Arbitrum Sepolia, Base, Base Sepolia for Zora

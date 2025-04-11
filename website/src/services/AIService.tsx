@@ -251,18 +251,24 @@ export const assessInsurance = async (
   }
 };
 
-export const generateCoinRecommendation = async (contractCode: string): Promise<any> => {
+export const generateCoinRecommendation = async (
+    contractCode: string,
+    analysis: any
+  ): Promise<any> => {
     try {
       const requestData: ChatCompletionRequestWithVenice = {
         model: "default",
         messages: [
           {
             role: "system",
-            content: `You are an expert in smart contract analysis and tokenomics. Generate recommendations for a Zora coin based on the provided smart contract. Include suggested name, symbol, initial supply, and distribution model.`
+            content: `You are an expert in smart contract analysis and tokenomics. Based on the provided smart contract 
+            analysis, generate recommendations for a tokenomics model that would be appropriate for this contract.
+            Include suggested name, symbol, initial supply, and distribution strategy. The contract has a security score
+            of ${analysis.overall_score}/100 and risk level of ${analysis.vulnerabilities.risk_level}.`
           },
           {
             role: "user",
-            content: `Analyze this smart contract and recommend tokenomics for a Zora coin:\n\n${contractCode}`
+            content: `Generate tokenomics recommendations for this contract:\n\n${contractCode}\n\nAnalysis: ${JSON.stringify(analysis)}`
           }
         ],
         temperature: 0.7,
@@ -274,16 +280,44 @@ export const generateCoinRecommendation = async (contractCode: string): Promise<
   
       const response = await openai.createChatCompletion(requestData as any);
       const content = response?.data?.choices?.[0]?.message?.content ?? "";
-  
-      // You can parse content if Venice returns structured JSON later
+      
+      // Extract name and symbol from the AI response
+      // This is a simplified approach - you'd need more sophisticated parsing
+      const nameMatch = content.match(/name:?\s*["']?([\w\s]+)["']?/i);
+      const symbolMatch = content.match(/symbol:?\s*["']?([\w\s]+)["']?/i);
+      
+      const securityLevel = analysis.overall_score > 80 ? 'Safe' : 
+                           analysis.overall_score > 60 ? 'Secure' : 'Flex';
+                           
       return {
-        name: "Generated Coin Name",
-        symbol: "GCN",
-        initialSupply: 1000000,
-        distribution: "30% team, 40% community, 30% reserves"
+        name: nameMatch ? nameMatch[1] : `CodeGene ${securityLevel} Token`,
+        symbol: symbolMatch ? symbolMatch[1] : `CG${securityLevel.charAt(0)}`,
+        recommendedText: content,
+        initialSupply: analysis.overall_score > 80 ? 1000000 : 500000,
+        // Other tokenomics parameters
+        distribution: {
+          team: 15,
+          community: 40,
+          treasury: 20,
+          liquidity: 25
+        }
       };
     } catch (error: any) {
       console.error('Error generating coin recommendation:', error);
-      throw new Error('Failed to generate coin recommendation.');
+      // Return fallback recommendations
+      const securityLevel = analysis.overall_score > 80 ? 'Safe' : 
+                           analysis.overall_score > 60 ? 'Secure' : 'Flex';
+      return {
+        name: `CodeGene ${securityLevel} Token`,
+        symbol: `CG${securityLevel.charAt(0)}`,
+        recommendedText: "Failed to generate AI recommendations.",
+        initialSupply: 1000000,
+        distribution: {
+          team: 20,
+          community: 40,
+          treasury: 20,
+          liquidity: 20
+        }
+      };
     }
   };

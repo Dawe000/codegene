@@ -3,13 +3,13 @@ import { Box, Tab, Tabs, Paper } from '@mui/material';
 import CodeIcon from '@mui/icons-material/Code';
 import TranslateIcon from '@mui/icons-material/Translate';
 import SecurityIcon from '@mui/icons-material/Security';
+import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import AuditTab from './tabs/AuditTab';
-import TranslateTab from '././tabs/TranslateTab';
+import TranslateTab from './tabs/TranslateTab';
 import InsuranceTab from './tabs/InsuranceTab';
 import SubscriptionTab from './tabs/subscribstionTab';
 import ZoraCoinsTab from './tabs/ZoraCoinsTab';
-//import InsuranceTab from './tabs/InsuranceTab';
-//import SubscriptionTab from './tabs/subscribstionTab';
+import TokenDistributionTab from './tabs/TokenDistributionTab';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -65,7 +65,8 @@ const AuditorTabs = () => {
           <Tab icon={<SecurityIcon />} label="AUDIT" {...a11yProps(1)} />
           <Tab icon={<CodeIcon />} label="INSURANCE" {...a11yProps(2)} />
           <Tab icon={<SecurityIcon />} label="SUBSCRIPTION" {...a11yProps(3)} />
-          <Tab icon={<SecurityIcon />} label="ZORA COINS" {...a11yProps(4)} />
+          <Tab icon={<MonetizationOnIcon />} label="ZORA COINS" {...a11yProps(4)} />
+          <Tab icon={<MonetizationOnIcon />} label="DISTRIBUTE" {...a11yProps(5)} />
         </Tabs>
       </Box>
       
@@ -77,16 +78,20 @@ const AuditorTabs = () => {
         <AuditTab />
       </TabPanel>
 
+      <TabPanel value={value} index={2}>
+        <InsuranceTab />
+      </TabPanel>
+      
       <TabPanel value={value} index={3}>
         <SubscriptionTab />
       </TabPanel>
-
+      
       <TabPanel value={value} index={4}>
         <ZoraCoinsTab />
       </TabPanel>
-       
-      <TabPanel value={value} index={2}>
-        <InsuranceTab />
+      
+      <TabPanel value={value} index={5}>
+        <TokenDistributionTab />
       </TabPanel>
     </Paper>
   );
