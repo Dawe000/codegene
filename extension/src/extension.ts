@@ -6,6 +6,7 @@ import { SidebarWebViewProvider } from './webviewProvider';
 import { getSolAndRustFileNames, getGroupedFileNames } from './fileNameUtils';
 import { analyzeContract, generateExploit, generateHardhatTest } from './veniceService';
 import * as fileUtils from './fileUtils';
+import * as hardhatService from './hardhatService';
 
 // Create a dedicated output channel
 let outputChannel: vscode.OutputChannel;
@@ -319,6 +320,47 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand('testsidebarextension.analyzeAllContracts', () => {
       analyzeHardhatContracts(provider);
+    }),
+
+    // Add the new command for starting Hardhat node and deploying contracts
+    vscode.commands.registerCommand('testsidebarextension.startNodeAndDeploy', async () => {
+      try {
+        const result = await hardhatService.startNodeAndDeploy(outputChannel);
+        
+        if (result.success) {
+          vscode.window.showInformationMessage(result.message);
+          
+          // If webview is available, send the deployment info
+          if (provider && provider.webview) {
+            provider.webview.postMessage({
+              command: 'hardhatNodeStarted',
+              nodeUrl: result.nodeUrl,
+              contractAddresses: result.contractAddresses || []
+            });
+          }
+        } else {
+          vscode.window.showErrorMessage(result.message);
+        }
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`Error: ${error.message}`);
+      }
+    }),
+    
+    // Add a command to stop the Hardhat node
+    vscode.commands.registerCommand('testsidebarextension.stopNode', () => {
+      const stopped = hardhatService.stopNode();
+      if (stopped) {
+        vscode.window.showInformationMessage('Hardhat node stopped');
+        
+        // Notify webview if available
+        if (provider && provider.webview) {
+          provider.webview.postMessage({
+            command: 'hardhatNodeStopped'
+          });
+        }
+      } else {
+        vscode.window.showInformationMessage('No Hardhat node is running');
+      }
     })
   );
   

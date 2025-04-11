@@ -116,6 +116,109 @@ npm install --save-dev hardhat @nomicfoundation/hardhat-toolbox</pre>
   );
 };
 
+const HardhatControls: React.FC<{ isProjectDetected: boolean }> = ({ isProjectDetected }) => {
+  const [nodeStatus, setNodeStatus] = useState<'stopped' | 'running' | 'starting'>('stopped');
+  const [contractAddresses, setContractAddresses] = useState<string[]>([]);
+  
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      const message = event.data;
+      
+      if (message.command === 'hardhatNodeStarted') {
+        setNodeStatus('running');
+        if (message.contractAddresses) {
+          setContractAddresses(message.contractAddresses);
+        }
+      } else if (message.command === 'hardhatNodeStopped') {
+        setNodeStatus('stopped');
+        setContractAddresses([]);
+      }
+    };
+    
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+  
+  if (!isProjectDetected) {
+    return null;
+  }
+  
+  return (
+    <div className="mb-6 bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 overflow-hidden">
+      <div className="bg-gradient-to-r from-slate-800 to-slate-800/50 px-6 py-4 border-b border-slate-700/50 flex items-center justify-between">
+        <span className="text-sm font-medium flex items-center gap-2">
+          <span className="text-cyan-400">⚙️</span> Hardhat Node Controls
+        </span>
+      </div>
+      
+      <div className="p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className={`w-3 h-3 rounded-full ${
+              nodeStatus === 'running' ? 'bg-emerald-500 animate-pulse' : 
+              nodeStatus === 'starting' ? 'bg-amber-500 animate-pulse' : 
+              'bg-red-500'
+            }`}></div>
+            <span className="text-sm font-medium">
+              {nodeStatus === 'running' ? 'Node Running' : 
+               nodeStatus === 'starting' ? 'Starting Node...' : 
+               'Node Stopped'}
+            </span>
+          </div>
+          
+          <div className="flex gap-2">
+            {nodeStatus === 'stopped' && (
+              <button
+                onClick={() => {
+                  setNodeStatus('starting');
+                  vscode.postMessage({
+                    command: 'startNodeAndDeploy'
+                  });
+                }}
+                className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-md text-sm font-medium flex items-center gap-2 hover:shadow-lg hover:shadow-cyan-500/20 transition-all"
+              >
+                <span>▶️</span> Start Node & Deploy
+              </button>
+            )}
+            
+            {nodeStatus === 'running' && (
+              <button
+                onClick={() => {
+                  vscode.postMessage({
+                    command: 'stopNode'
+                  });
+                }}
+                className="px-4 py-2 bg-gradient-to-r from-red-500 to-amber-500 text-white rounded-md text-sm font-medium flex items-center gap-2 hover:shadow-lg hover:shadow-red-500/20 transition-all"
+              >
+                <span>⏹️</span> Stop Node
+              </button>
+            )}
+          </div>
+        </div>
+        
+        {nodeStatus === 'running' && contractAddresses.length > 0 && (
+          <div className="mt-4">
+            <h5 className="text-sm font-medium text-slate-400 mb-2">Deployed Contracts:</h5>
+            <div className="bg-slate-900/50 p-4 rounded-lg max-h-32 overflow-y-auto">
+              {contractAddresses.map((address, i) => (
+                <div key={i} className="text-sm text-slate-300 mb-1 font-mono">
+                  {address}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        
+        {nodeStatus === 'running' && (
+          <div className="mt-4 text-sm bg-slate-900/50 p-3 rounded-lg text-slate-400">
+            <span className="font-medium">JSON-RPC Endpoint:</span> http://localhost:8545
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const App: React.FC<AppProps> = () => {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [analysis, setAnalysis] = useState<any>(null);
@@ -396,6 +499,9 @@ const App: React.FC<AppProps> = () => {
       {analysis && analysis.vulnerabilities && analysis.vulnerabilities.exploits && analysis.vulnerabilities.exploits.length > 0 && (
         <HardhatInstructions />
       )}
+
+      {/* Hardhat Controls */}
+      <HardhatControls isProjectDetected={projectDetected} />
 
       {/* Analysis Results */}
       {analysis && (

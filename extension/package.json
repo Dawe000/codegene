@@ -60,6 +60,14 @@
       {
         "command": "testsidebarextension.analyzeAllContracts",
         "title": "Analyze All Hardhat Contracts"
+      },
+      {
+        "command": "testsidebarextension.startNodeAndDeploy",
+        "title": "Start Hardhat Node and Deploy Contracts"
+      },
+      {
+        "command": "testsidebarextension.stopNode",
+        "title": "Stop Hardhat Node"
       }
     ],
     "menus": {

@@ -90,6 +90,14 @@ export class SidebarWebViewProvider implements vscode.WebviewViewProvider {
           console.log('Executing analyzeAllContracts command');
           vscode.commands.executeCommand('testsidebarextension.analyzeAllContracts');
           break;
+        case 'startNodeAndDeploy':
+          console.log('Executing startNodeAndDeploy command');
+          vscode.commands.executeCommand('testsidebarextension.startNodeAndDeploy');
+          break;
+        case 'stopNode':
+          console.log('Executing stopNode command');
+          vscode.commands.executeCommand('testsidebarextension.stopNode');
+          break;
       }
     });
   }
