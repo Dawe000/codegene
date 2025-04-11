@@ -56,6 +56,10 @@
       {
         "command": "testsidebarextension.generateExploit",
         "title": "Generate Security Exploit"
+      },
+      {
+        "command": "testsidebarextension.analyzeAllContracts",
+        "title": "Analyze All Hardhat Contracts"
       }
     ],
     "menus": {

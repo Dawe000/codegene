@@ -1,15 +1,23 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { SidebarWebViewProvider } from './webviewProvider';
 import { getSolAndRustFileNames, getGroupedFileNames } from './fileNameUtils';
 import { analyzeContract, generateExploit, generateHardhatTest } from './veniceService';
+import * as fileUtils from './fileUtils';
 
 // Create a dedicated output channel
 let outputChannel: vscode.OutputChannel;
 
 // Make provider accessible from both functions
 let provider: SidebarWebViewProvider;
+
+// Add this at the top of your file with other state variables
+let lastAnalyzedCode: string = ''; // Store the last analyzed contract code
+
+// Add this near the top of your file where you define variables
+const TEMP_FILE_PATH = path.join(os.tmpdir(), 'lastAnalyzedCode.sol');
 
 // Load environment variables from .env file
 function loadEnvFile() {
@@ -231,13 +239,41 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }),
     
-    vscode.commands.registerCommand('testsidebarextension.downloadAllExploits', async (vulnerabilityType: string, exploits: any[]) => {
-      if (!vscode.window.activeTextEditor) {
-        vscode.window.showWarningMessage('No file is currently open');
-        return;
+    vscode.commands.registerCommand('testsidebarextension.downloadAllExploits', async (vulnerabilityType: string, exploits: any[], fromHardhatAnalysis?: boolean) => {
+      console.log(`[downloadAllExploits] Called for ${vulnerabilityType}`);
+      console.log(`[downloadAllExploits] fromHardhatAnalysis: ${fromHardhatAnalysis}`);
+      console.log(`[downloadAllExploits] lastAnalyzedCode available: ${lastAnalyzedCode ? 'YES' : 'NO'}, length: ${lastAnalyzedCode?.length || 0}`);
+      
+      let contractCode = '';
+      
+      // First try to get code from last analyzed code (most reliable)
+      if (lastAnalyzedCode) {
+        contractCode = lastAnalyzedCode;
+        console.log("[downloadAllExploits] Using lastAnalyzedCode");
+      }
+      // Then try to get from the active editor
+      else if (vscode.window.activeTextEditor) {
+        contractCode = vscode.window.activeTextEditor.document.getText();
+        console.log("[downloadAllExploits] Using code from active editor");
+      } 
+      // If no active editor but we're coming from Hardhat analysis, use the stored code
+      else if (fromHardhatAnalysis) {
+        if (fs.existsSync(TEMP_FILE_PATH)) {
+          // Try to recover from temp file
+          try {
+            contractCode = fs.readFileSync(TEMP_FILE_PATH, 'utf8');
+            console.log(`[downloadAllExploits] Recovered ${contractCode.length} characters from temp file`);
+          } catch (err) {
+            console.error('[downloadAllExploits] Failed to read from temp file:', err);
+          }
+        }
       }
       
-      const contractCode = vscode.window.activeTextEditor.document.getText();
+      // If still no code, show error and return
+      if (!contractCode) {
+        vscode.window.showWarningMessage('No contract code available. Please open a contract file or analyze contracts first.');
+        return;
+      }
       
       // Ask the user which generation method to use
       const choice = await vscode.window.showQuickPick(
@@ -262,12 +298,27 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('testsidebarextension.generateHardhatTest', async (vulnerabilityType: string, severity?: string) => {
       console.log(`Generating Hardhat test for ${vulnerabilityType} vulnerability with severity ${severity || 'unknown'}`);
       
-      if (!vscode.window.activeTextEditor) {
-        vscode.window.showWarningMessage('No file is currently open');
+      let contractCode = '';
+      
+      // Try to get contract code from the active editor if available
+      if (vscode.window.activeTextEditor) {
+        contractCode = vscode.window.activeTextEditor.document.getText();
+      } 
+      // If no active editor but we have stored code from Hardhat analysis, use that
+      else if (lastAnalyzedCode) {
+        contractCode = lastAnalyzedCode;
+      } 
+      // If no source is available, show error and return
+      else {
+        vscode.window.showWarningMessage('No contract code available. Please open a contract file or analyze contracts first.');
         return;
       }
-      const contractCode = vscode.window.activeTextEditor.document.getText();
+      
       await generateAndSaveHardhatTest(vulnerabilityType, contractCode);
+    }),
+
+    vscode.commands.registerCommand('testsidebarextension.analyzeAllContracts', () => {
+      analyzeHardhatContracts(provider);
     })
   );
   
@@ -287,33 +338,54 @@ export function activate(context: vscode.ExtensionContext) {
 /**
  * Shows files in the output channel and sends them to the webview
  */
-function showFiles(provider?: SidebarWebViewProvider) {
+async function showFiles(provider?: SidebarWebViewProvider) {
   try {
-    // Still log to output channel
-    outputChannel.appendLine('===== FINDING SOLIDITY & RUST FILES =====');
+    outputChannel.appendLine('===== CHECKING FOR HARDHAT PROJECT =====');
     
-    // Get the filenames
-    getSolAndRustFileNames()
-      .then(files => {
-        // Show in output channel
-        outputChannel.appendLine(`\nFound ${files.length} files:`);
-        files.forEach(file => outputChannel.appendLine(`- ${file}`));
-        
-        // Send to webview if provider exists
-        if (provider && provider.webview) {
-          // Send the filenames to the webview
-          provider.webview.postMessage({
-            command: 'displayFiles',
-            files: files
-          });
-        }
-      })
-      .catch(err => {
-        outputChannel.appendLine(`\nERROR: ${err.message}`);
-      });
+    // Use fileUtils for Hardhat project detection
+    const isHardhat = await fileUtils.isHardhatProject();
+    if (isHardhat) {
+      outputChannel.appendLine('Hardhat project detected');
+      
+      // Use fileUtils to get Hardhat contracts
+      const contracts = await fileUtils.findHardhatContracts();
+      outputChannel.appendLine(`Found ${contracts.length} contracts in the Hardhat project`);
+      
+      // Send to webview if provider exists
+      if (provider && provider.webview) {
+        provider.webview.postMessage({
+          command: 'displayFiles',
+          isHardhatProject: true,
+          projectPath: fileUtils.getWorkspacePath() || '',
+          files: contracts
+        });
+      }
+    } else {
+      outputChannel.appendLine('No Hardhat project detected');
+      
+      // Fallback to regular file detection (still show Solidity/Rust files)
+      getSolAndRustFileNames()
+        .then(files => {
+          // Show in output channel
+          outputChannel.appendLine(`\nFound ${files.length} files:`);
+          files.forEach(file => outputChannel.appendLine(`- ${file}`));
+          
+          // Send to webview
+          if (provider && provider.webview) {
+            provider.webview.postMessage({
+              command: 'displayFiles',
+              isHardhatProject: false,
+              files: files.map(name => ({
+                name: name,
+                path: '' // We don't have paths for these right now
+              }))
+            });
+          }
+        });
+    }
   } catch (error) {
     console.error('Error in showFiles:', error);
-    vscode.window.showErrorMessage('Error showing files. See console for details.');
+    vscode.window.showErrorMessage('Error detecting project files. See console for details.');
   }
 }
 
@@ -475,6 +547,9 @@ async function analyzeMultipleFiles(fileNames: string[]) {
     // Combine file contents with clear separation between files
     const combinedCode = fileContents.join('\n\n// ==========================================\n\n');
     
+    // Store the contract code for later use with test generation
+    lastAnalyzedCode = combinedCode;
+    
     vscode.window.showInformationMessage(`Analyzing ${selectedFiles.length} files...`);
     
     // Analyze the combined contract
@@ -518,179 +593,92 @@ async function analyzeMultipleFiles(fileNames: string[]) {
 }
 
 /**
+ * Analyzes all contracts in a Hardhat project
+ */
+async function analyzeHardhatContracts(provider?: SidebarWebViewProvider) {
+  try {
+    setIsLoading(true);
+    
+    // Get all contracts using fileUtils
+    const contracts = await fileUtils.findHardhatContracts();
+    
+    if (contracts.length === 0) {
+      vscode.window.showWarningMessage('No contracts found in Hardhat project');
+      setIsLoading(false);
+      return;
+    }
+    
+    // Use fileUtils to read and combine contracts
+    const contractPaths = contracts.map(c => c.path);
+    const combinedCode = await fileUtils.readAndCombineContracts(contractPaths);
+    
+    // Store the contract code globally for later use with test generation
+    // This is the key fix - make sure we're setting the global variable
+    lastAnalyzedCode = combinedCode;
+    console.log(`[analyzeHardhatContracts] Stored ${combinedCode.length} characters in lastAnalyzedCode`);
+    
+    // Also save to a temp file as a redundant backup
+    try {
+      fs.writeFileSync(TEMP_FILE_PATH, combinedCode);
+      console.log(`[analyzeHardhatContracts] Saved ${combinedCode.length} characters to temp file: ${TEMP_FILE_PATH}`);
+    } catch (error) {
+      console.error('Error writing to temp file:', error);
+    }
+    
+    vscode.window.showInformationMessage(`Analyzing ${contracts.length} contracts...`);
+    
+    // Analyze the combined contracts
+    const result = await analyzeContract(combinedCode);
+    
+    // Send results to webview
+    if (provider && provider.webview) {
+      provider.webview.postMessage({
+        command: 'displayAnalysis',
+        analysis: result,
+        fileName: contracts.map(c => c.name).join(', ')
+      });
+    }
+    
+    // Show a notification with the overall score
+    if (result && typeof result.overall_score === 'number') {
+      vscode.window.showInformationMessage(
+        `Analysis complete: Overall score: ${result.overall_score}/100`
+      );
+    } else {
+      vscode.window.showInformationMessage('Analysis complete. See sidebar for details.');
+    }
+  } catch (error: any) {
+    console.error('Error analyzing Hardhat contracts:', error);
+    vscode.window.showErrorMessage(`Error analyzing contracts: ${error.message}`);
+    
+    // Send error to webview
+    if (provider && provider.webview) {
+      provider.webview.postMessage({
+        command: 'displayAnalysis',
+        analysis: { error: error.message },
+        fileName: 'Hardhat Contracts'
+      });
+    }
+  } finally {
+    setIsLoading(false);
+  }
+}
+
+/**
  * Combines multiple exploits into a single test file
  */
 async function combineAndSaveExploits(vulnerabilityType: string, contractCode: string, exploits: any[]) {
   try {
-    if (!exploits || exploits.length === 0) {
-      vscode.window.showWarningMessage('No exploits to combine');
-      return;
+    const filePath = await fileUtils.combineExploitsToFile(vulnerabilityType, contractCode, exploits);
+    
+    if (filePath) {
+      // Open the file
+      const document = await vscode.workspace.openTextDocument(filePath);
+      vscode.window.showTextDocument(document, { viewColumn: vscode.ViewColumn.Beside });
+      
+      vscode.window.showInformationMessage(`Combined exploit tests saved to: ${path.basename(filePath)}`);
     }
     
-    console.log(`Combining ${exploits.length} exploits for ${vulnerabilityType}`);
-    console.log('Exploits data:', JSON.stringify(exploits.map(e => ({ 
-      name: e.vulnerability_name || e.name, 
-      hasHardhatTest: !!e.hardhat_test 
-    }))));
-    
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders) {
-      vscode.window.showErrorMessage('No workspace folder is open');
-      return;
-    }
-    
-    // Create test directory if it doesn't exist
-    const testDir = path.join(workspaceFolders[0].uri.fsPath, 'test');
-    if (!fs.existsSync(testDir)) {
-      fs.mkdirSync(testDir, { recursive: true });
-    }
-    
-    // Combine all exploits into a single file
-    const fileName = `Combined_${vulnerabilityType.replace(/\s+/g, '_')}_Exploits.js`;
-    const filePath = path.join(testDir, fileName);
-    
-    let combinedCode = `// Combined Exploit Tests for ${vulnerabilityType}\n`;
-    combinedCode += `// Generated on ${new Date().toLocaleString()}\n\n`;
-    combinedCode += `const { expect } = require("chai");\n`;
-    combinedCode += `const { ethers } = require("hardhat");\n\n`;
-    combinedCode += `describe("${vulnerabilityType} Vulnerability Tests", function() {\n`;
-    
-    // Add each exploit as a separate test
-    for (const exploit of exploits) {
-      // Get exploit name - handle different property names
-      const exploitName = exploit.vulnerability_name || exploit.name || 'Unnamed Exploit';
-      const severity = exploit.severity || 'Unknown';
-      
-      if (!exploit.hardhat_test) {
-        // If no hardhat_test, try to generate one from exploit_code
-        if (exploit.exploit_code) {
-          combinedCode += `\n  // ${exploitName} - ${severity} Severity\n`;
-          combinedCode += `  it("should test ${exploitName}", async function() {\n`;
-          combinedCode += `    // Placeholder: This was generated from exploit_code\n`;
-          combinedCode += `    // Original exploit code:\n`;
-          
-          const cleanExploitCode = exploit.exploit_code
-            .replace(/^```[\w-]*\n/m, '')
-            .replace(/\n```$/m, '')
-            .split('\n')
-            .map((line: string) => `    // ${line}`)
-            .join('\n');
-            
-          combinedCode += cleanExploitCode + '\n\n';
-          combinedCode += `    // TODO: Convert this to a working Hardhat test\n`;
-          combinedCode += `    // This is a placeholder test\n`;
-          combinedCode += `    // Deploy the vulnerable contract\n`;
-          combinedCode += `    const ContractFactory = await ethers.getContractFactory("VulnerableContract");\n`;
-          combinedCode += `    const contract = await ContractFactory.deploy();\n`;
-          combinedCode += `    await contract.deployed();\n\n`;
-          combinedCode += `    // Basic assertion to make test pass\n`;
-          combinedCode += `    expect(await contract.address).to.be.properAddress;\n`;
-          combinedCode += `  });\n`;
-          continue;
-        } else {
-          // Skip this exploit if it has no code
-          console.log(`Skipping exploit "${exploitName}" as it has no hardhat_test or exploit_code`);
-          continue;
-        }
-      }
-      
-      // Clean the hardhat test code
-      let testCode = exploit.hardhat_test;
-      testCode = testCode.replace(/^```[\w-]*\n/m, '');
-      testCode = testCode.replace(/\n```$/m, '');
-      
-      console.log(`Processing exploit "${exploitName}"`);
-      console.log(`Test code length: ${testCode.length} characters`);
-      
-      // Check if the test code is empty
-      if (!testCode.trim()) {
-        console.log(`Empty test code for "${exploitName}", skipping`);
-        continue;
-      }
-      
-      // Extract imports and setup code
-      const importMatches = testCode.match(/^const .* = require\([^)]*\);/gm);
-      if (importMatches && importMatches.length > 0) {
-        // Add these to the top of the file if not already included
-        for (const importLine of importMatches) {
-          if (!combinedCode.includes(importLine)) {
-            // Find the location after the existing imports
-            const lastImportIndex = combinedCode.lastIndexOf('require');
-            if (lastImportIndex > 0) {
-              const insertIndex = combinedCode.indexOf('\n', lastImportIndex) + 1;
-              combinedCode = combinedCode.slice(0, insertIndex) + 
-                             importLine + '\n' + 
-                             combinedCode.slice(insertIndex);
-            }
-          }
-        }
-      }
-      
-      // Extract the describe block content using a more flexible regex
-      const describeMatch = testCode.match(/describe\([^{]*{([\s\S]*?)}\)\;?\s*$/);
-      
-      if (describeMatch && describeMatch[1]) {
-        // Extract just the test content, not the describe wrapper
-        combinedCode += `\n  // ${exploitName} - ${severity} Severity\n`;
-        combinedCode += `  it("should test ${exploitName}", async function() {\n`;
-        
-        // Extract the it block content or use the whole describe content
-        const itMatch = describeMatch[1].match(/it\([^{]*{([\s\S]*?)}\)\;/);
-        if (itMatch && itMatch[1]) {
-          combinedCode += `    ${itMatch[1].trim()}\n`;
-        } else {
-          // If no it block found, use the describe content with indentation
-          // Skip any before/after hooks
-          const content = describeMatch[1]
-            .replace(/beforeEach\([^{]*{[\s\S]*?}\)\;/g, '')
-            .replace(/afterEach\([^{]*{[\s\S]*?}\)\;/g, '')
-            .trim();
-            
-          combinedCode += content.split('\n')
-            .map((line: string) => line.trim() ? `    ${line}` : line)
-            .join('\n');
-        }
-        
-        combinedCode += `  });\n`;
-      } else {
-        // If no describe block found, look for standalone it blocks
-        const itBlockMatch = testCode.match(/it\([^{]*{([\s\S]*?)}\)\;/);
-        if (itBlockMatch && itBlockMatch[1]) {
-          combinedCode += `\n  // ${exploitName} - ${severity} Severity\n`;
-          combinedCode += `  it("should test ${exploitName}", async function() {\n`;
-          combinedCode += `    ${itBlockMatch[1].trim()}\n`;
-          combinedCode += `  });\n`;
-        } else {
-          // Fallback: just include the entire test with a comment
-          combinedCode += `\n  // ${exploitName} - ${severity} Severity (Raw Test)\n`;
-          combinedCode += `  it("should test ${exploitName}", async function() {\n`;
-          
-          // Try to extract the core test functionality, removing imports and wrapper boilerplate
-          const cleanedCode = testCode
-            .replace(/^const .* = require\([^)]*\);/gm, '')
-            .replace(/describe\([^{]*{/g, '')
-            .replace(/}\)\;?\s*$/g, '')
-            .trim();
-            
-          combinedCode += cleanedCode.split('\n')
-            .map((line: string) => line.trim() ? `    ${line}` : line)
-            .join('\n');
-            
-          combinedCode += `  });\n`;
-        }
-      }
-    }
-    
-    combinedCode += `});\n`;
-    
-    // Write the combined file
-    fs.writeFileSync(filePath, combinedCode);
-    
-    // Open the file
-    const document = await vscode.workspace.openTextDocument(filePath);
-    vscode.window.showTextDocument(document, { viewColumn: vscode.ViewColumn.Beside });
-    
-    vscode.window.showInformationMessage(`Combined exploit tests saved to: ${fileName}`);
     return filePath;
   } catch (error: any) {
     console.error('Error combining exploits:', error);
@@ -704,18 +692,6 @@ async function combineAndSaveExploits(vulnerabilityType: string, contractCode: s
  */
 async function generateAndSaveHardhatTest(vulnerabilityType: string, contractCode: string) {
   try {
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders) {
-      vscode.window.showErrorMessage('No workspace folder is open');
-      return null;
-    }
-    
-    // Create test directory if it doesn't exist
-    const testDir = path.join(workspaceFolders[0].uri.fsPath, 'test');
-    if (!fs.existsSync(testDir)) {
-      fs.mkdirSync(testDir, { recursive: true });
-    }
-    
     // Create progress notification
     return await vscode.window.withProgress({
       location: vscode.ProgressLocation.Notification,
@@ -731,16 +707,15 @@ async function generateAndSaveHardhatTest(vulnerabilityType: string, contractCod
         return null;
       }
       
-      // Write the file
+      // Use fileUtils to write the test file
       const fileName = `${vulnerabilityType.replace(/\s+/g, '_')}_ExploitTest.js`;
-      const filePath = path.join(testDir, fileName);
-      fs.writeFileSync(filePath, hardhatTest);
+      const filePath = await fileUtils.writeHardhatTestFile(fileName, hardhatTest);
       
       // Open the file
       const document = await vscode.workspace.openTextDocument(filePath);
       vscode.window.showTextDocument(document, { viewColumn: vscode.ViewColumn.Beside });
       
-      vscode.window.showInformationMessage(`Hardhat exploit test saved to: ${fileName}`);
+      vscode.window.showInformationMessage(`Hardhat exploit test saved to: ${path.basename(filePath)}`);
       return filePath;
     });
   } catch (error: any) {

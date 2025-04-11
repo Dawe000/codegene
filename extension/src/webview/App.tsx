@@ -47,7 +47,7 @@ const ScoreIndicator: React.FC<{ score: number }> = ({ score }) => {
 
 interface FileItem {
   name: string;
-  selected: boolean;
+  path: string; // Added path property to store full file path
   isAnalysisResult: boolean;
 }
 
@@ -120,7 +120,8 @@ const App: React.FC<AppProps> = () => {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [analysis, setAnalysis] = useState<any>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [selectedCount, setSelectedCount] = useState<number>(0);
+  const [projectDetected, setProjectDetected] = useState<boolean>(false);
+  const [projectInfo, setProjectInfo] = useState<{path: string, contractCount: number} | null>(null);
 
   useEffect(() => {
     const messageHandler = (event: MessageEvent) => {
@@ -129,12 +130,20 @@ const App: React.FC<AppProps> = () => {
       switch (message.command) {
         case 'displayFiles':
           setIsLoading(false);
-          setFiles(message.files.map((file: string) => ({
-            name: file,
-            selected: false,
+          // Update to handle Hardhat project information
+          if (message.isHardhatProject) {
+            setProjectDetected(true);
+            setProjectInfo({
+              path: message.projectPath || 'Unknown',
+              contractCount: message.files.length
+            });
+          }
+          
+          setFiles(message.files.map((file: {name: string, path: string}) => ({
+            name: file.name,
+            path: file.path,
             isAnalysisResult: false
           })));
-          setSelectedCount(0);
           break;
 
         case 'displayAnalysis':
@@ -143,8 +152,8 @@ const App: React.FC<AppProps> = () => {
           setFiles(prev => [
             ...prev,
             {
-              name: `Analysis complete for: ${message.fileName || 'Selected files'}`,
-              selected: false,
+              name: `Analysis complete for: ${message.fileName || 'Contracts'}`,
+              path: '',
               isAnalysisResult: true
             }
           ]);
@@ -172,7 +181,7 @@ const App: React.FC<AppProps> = () => {
             ...prev,
             {
               name: `Exploit generated for: ${message.vulnerabilityType}`,
-              selected: false,
+              path: '',
               isAnalysisResult: true
             }
           ]);
@@ -184,33 +193,10 @@ const App: React.FC<AppProps> = () => {
     return () => window.removeEventListener('message', messageHandler);
   }, []);
 
-  const toggleFileSelection = (index: number) => {
-    setFiles(prev => {
-      const newFiles = [...prev];
-      if (!newFiles[index].isAnalysisResult) {
-        newFiles[index].selected = !newFiles[index].selected;
-        setSelectedCount(
-          newFiles.filter(file => file.selected && !file.isAnalysisResult).length
-        );
-      }
-      return newFiles;
-    });
-  };
-
-  const analyzeSelectedFiles = () => {
-    const selectedFiles = files.filter(file => file.selected && !file.isAnalysisResult);
-    
-    if (selectedFiles.length === 0) {
-      vscode.postMessage({
-        command: 'showInfo',
-        text: 'Please select at least one file to analyze'
-      });
-      return;
-    }
-
+  // Function to trigger analysis of all contracts
+  const analyzeAllContracts = () => {
     vscode.postMessage({
-      command: 'analyzeSelectedFiles',
-      fileNames: selectedFiles.map(file => file.name)
+      command: 'analyzeAllContracts'
     });
   };
 
@@ -230,54 +216,26 @@ const App: React.FC<AppProps> = () => {
       return (
         <div className="relative bg-slate-800/50 backdrop-blur-sm rounded-xl p-6 border border-slate-700/50 hover:border-slate-600/50 transition-all duration-300">
           <div className="absolute inset-0 bg-gradient-to-br from-slate-800/50 to-transparent rounded-xl" />
-          
-          <div className="relative flex items-center justify-between mb-4">
-            <h5 className="font-semibold text-lg text-slate-200">{title}</h5>
-            {data.risk_level && <RiskBadge level={data.risk_level} />}
-          </div>
-    
-          {typeof data.score === 'number' && (
-            <div className="relative mb-6 bg-slate-900/50 p-4 rounded-lg border border-slate-700/50">
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-sm font-medium text-slate-400">Score</span>
-                <ScoreIndicator score={data.score} />
-              </div>
+          <div className="relative">
+            <div className="flex items-center gap-3 mb-4">
+              <h4 className="text-lg font-semibold text-white">Vulnerabilities Found</h4>
+              <RiskBadge level={data.risk_level} />
+              <ScoreIndicator score={data.score} />
             </div>
-          )}
-    
-          <div className="relative mt-4">
-            <h6 className="font-medium text-sm text-slate-400 mb-3">Findings</h6>
-            {data.details && data.details.length > 0 ? (
-              <ul className="space-y-3 mb-6">
-                {data.details.map((detail: string, i: number) => (
-                  <li 
-                    key={i} 
-                    className="p-4 bg-slate-900/50 rounded-lg border-l-2 border-cyan-500/50 text-sm text-slate-300 leading-relaxed hover:bg-slate-900/80 transition-colors duration-300"
-                  >
-                    {detail}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-sm text-slate-500 italic mb-6">No details available</p>
-            )}
-            
-            {/* Add the exploit code section */}
-            <h6 className="font-medium text-sm text-red-400 mb-3">Vulnerability Exploits</h6>
-            {data.exploits && data.exploits.length > 0 ? (
-              <div className="space-y-2">
-                <div className="bg-slate-800 p-3 rounded-lg mb-4 text-xs text-slate-400">
-                  <p className="font-medium mb-1">About these exploit files:</p>
-                  <p>Each exploit comes with a complete Hardhat test file that demonstrates the vulnerability. 
-                  You can download and run these tests in a Hardhat environment to understand the security risks.</p>
+
+            {/* Display vulnerability details */}
+            <div className="space-y-6">
+              {data.details && data.details.map((detail: string, index: number) => (
+                <div key={index} className="bg-slate-900/50 rounded-lg p-4 border border-slate-700/50">
+                  <p className="text-sm text-slate-300">{detail}</p>
                 </div>
-                {data.exploits.map((exploit: any, i: number) => (
-                  <ExploitCode key={i} exploit={exploit} />
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-slate-500 italic">No exploit code generated</p>
-            )}
+              ))}
+              
+              {/* Display exploits */}
+              {data.exploits && data.exploits.map((exploit: any, index: number) => (
+                <ExploitCode key={index} exploit={exploit} />
+              ))}
+            </div>
 
             {/* Add a download all button if there are multiple exploits */}
             {data.exploits && data.exploits.length > 1 && (
@@ -287,7 +245,8 @@ const App: React.FC<AppProps> = () => {
                     vscode.postMessage({
                       command: 'downloadAllExploits',
                       exploits: data.exploits,
-                      vulnerabilityType: title
+                      vulnerabilityType: title,
+                      fromHardhatAnalysis: true
                     });
                   }}
                   className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-md text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-cyan-500/20 transition-all"
@@ -357,33 +316,64 @@ const App: React.FC<AppProps> = () => {
         )}
       </div>
 
-      {/* Files Section */}
-      {files.length > 0 && (
+      {/* Project Info Section - Simplified without file paths */}
+      {projectDetected ? (
+        <div className="mb-8 bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50">
+          <div className="bg-gradient-to-r from-slate-800 to-slate-800/50 px-6 py-4 rounded-t-xl border-b border-slate-700/50 flex items-center justify-between">
+            <span className="text-sm font-medium flex items-center gap-2">
+              <span className="text-cyan-400">📁</span> Hardhat Project Detected
+            </span>
+            <button
+              className="bg-gradient-to-r from-cyan-500 to-blue-500 text-white px-4 py-2 rounded-full text-xs font-medium transition-all duration-300 transform hover:scale-105 shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/40"
+              onClick={analyzeAllContracts}
+            >
+              Analyze All Contracts
+            </button>
+          </div>
+          <div className="p-4">
+            <div className="bg-slate-900/50 p-4 rounded-lg text-sm">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400">Contracts Found:</span>
+                <span className="text-slate-300 font-medium">{projectInfo?.contractCount || 0}</span>
+              </div>
+            </div>
+            
+            {/* Contracts List - Simplified without paths */}
+            {files.length > 0 && (
+              <div className="mt-4">
+                <h5 className="text-sm font-medium text-slate-400 mb-2">Contracts:</h5>
+                <div className="max-h-48 overflow-y-auto space-y-1">
+                  {files.filter(f => !f.isAnalysisResult).map((file, index) => (
+                    <div
+                      key={index}
+                      className="p-3 rounded-lg bg-slate-700/50 border border-transparent"
+                    >
+                      <div className="flex items-center text-slate-300">
+                        <span className="mr-2 text-slate-500">📄</span>
+                        <span className="font-medium">{file.name}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
         <div className="mb-8 bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50">
           <div className="bg-gradient-to-r from-slate-800 to-slate-800/50 px-6 py-4 rounded-t-xl border-b border-slate-700/50 flex items-center justify-between">
             <span className="text-sm font-medium flex items-center gap-2">
               <span className="text-cyan-400">📁</span> Available Files
             </span>
-            <button
-              className={`px-4 py-2 rounded-full text-xs font-medium transition-all duration-300 transform hover:scale-105 
-                ${selectedCount === 0 
-                  ? 'bg-slate-700 text-slate-400 cursor-not-allowed' 
-                  : 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/40'}`}
-              onClick={analyzeSelectedFiles}
-              disabled={selectedCount === 0}
-            >
-              {selectedCount === 0 ? 'Select Files' : `Analyze Selected (${selectedCount})`}
-            </button>
           </div>
           <div className="max-h-48 overflow-y-auto p-4 space-y-1">
             {files.map((file, index) => (
               <div
                 key={index}
                 className={`p-3 rounded-lg cursor-pointer transition-all duration-300 
-                  ${file.selected 
+                  ${file.isAnalysisResult 
                     ? 'bg-cyan-500/10 border border-cyan-500/20' 
                     : 'hover:bg-slate-700/50 border border-transparent'}`}
-                onClick={() => toggleFileSelection(index)}
               >
                 {file.isAnalysisResult ? (
                   <div className="flex items-center text-emerald-400">
