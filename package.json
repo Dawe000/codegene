@@ -15,7 +15,7 @@
     "@types/node": "^16.18.126",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.2",
-    "@web3-react/core": "^8.2.3",
+    "@web3-react/core": "^6.1.9",
     "@web3-react/injected-connector": "^6.0.7",
     "axios": "^1.8.4",
     "dotenv": "^16.5.0",

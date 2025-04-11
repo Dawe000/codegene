@@ -3,9 +3,10 @@ import React from 'react';
 import { Container, CssBaseline, ThemeProvider, createTheme } from '@mui/material';
 import { Web3ReactProvider } from '@web3-react/core';
 import { ethers } from 'ethers';
+import Header from './components/Header';
 
 // Function to get library from provider
-function getLibrary(provider: any) {
+function getLibrary(provider: any): ethers.providers.Web3Provider {
   const library = new ethers.providers.Web3Provider(provider);
   library.pollingInterval = 12000;
   return library;
@@ -33,11 +34,11 @@ const darkTheme = createTheme({
 
 function App() {
   return (
-    <Web3ReactProvider getLibrary={getLibrary}>
+    <Web3ReactProvider getLibrary={getLibrary as any}>
       <ThemeProvider theme={darkTheme}>
         <CssBaseline />
         <Container maxWidth="lg">
-          <h1>Smart Contract Insurance Platform</h1>
+          <Header />
           {/* We'll add more components here later */}
         </Container>
       </ThemeProvider>
