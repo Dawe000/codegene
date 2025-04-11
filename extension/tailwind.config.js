@@ -1,6 +1,8 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  content: ["./src/**/*.{html,js,ts,tsx}"],  // Added tsx to process React components
+  content: [
+    "./src/webview/**/*.{ts,tsx,js,jsx,html}",
+  ],
   theme: {
     extend: {},
   },

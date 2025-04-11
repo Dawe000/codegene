@@ -75,15 +75,15 @@
     "vscode:prepublish": "npm run compile && npm run build:tailwind",
     "compile": "webpack --mode production",
     "watch": "concurrently \"webpack --mode development --watch\" \"npm run watch:tailwind\"",
-    "watch:tailwind": "tailwindcss -i ./src/tailwind.css -o ./media/tailwind.css --watch",
+    "watch:tailwind": "npx tailwindcss -i ./src/webview/styles.css -o ./media/tailwind.css --watch",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
-    "build:tailwind": "tailwindcss -i ./src/tailwind.css -o ./media/tailwind.css"
+    "build:tailwind": "npx tailwindcss -i ./src/webview/styles.css -o ./media/tailwind.css --minify",
+    "dev": "concurrently \"npm run watch\" \"npm run watch:tailwind\""
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
-    "@types/node": "20.x",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.1",
     "@types/vscode": "^1.99.0",
