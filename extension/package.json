@@ -52,6 +52,10 @@
       {
         "command": "testsidebarextension.analyzeContractFromExplorer",
         "title": "Analyze Smart Contract"
+      },
+      {
+        "command": "testsidebarextension.generateExploit",
+        "title": "Generate Security Exploit"
       }
     ],
     "menus": {

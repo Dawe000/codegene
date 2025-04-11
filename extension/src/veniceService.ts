@@ -2,6 +2,8 @@
 import { Configuration, OpenAIApi } from "openai";
 import * as path from 'path';
 import * as dotenv from 'dotenv';
+import * as vscode from 'vscode';
+import * as fs from 'fs';
 
 // Load environment variables directly in this file
 const envPath = path.resolve(__dirname, '..', '.env');
@@ -92,7 +94,16 @@ export const analyzeContract = async (contractCode: string): Promise<any> => {
             "vulnerabilities": {
               "score": number from 0-100,
               "details": array of strings describing vulnerabilities,
-              "risk_level": "Low", "Medium", or "High"
+              "risk_level": "Low", "Medium", or "High",
+              "exploits": [
+                {
+                  "name": "Name of vulnerability",
+                  "description": "Brief description of the vulnerability",
+                  "severity": "Low", "Medium", or "High",
+                  "exploit_code": "TypeScript code that would exploit this vulnerability",
+                  "mitigation": "How to fix this vulnerability"
+                }
+              ]
             },
             "upgradability": {
               "score": number from 0-100,
@@ -108,11 +119,11 @@ export const analyzeContract = async (contractCode: string): Promise<any> => {
         },
         {
           role: "user",
-          content: `Analyze this smart contract:\n\n${contractCode}`
+          content: `Analyze this smart contract and generate exploit code where possible:\n\n${contractCode}`
         }
       ],
       temperature: 0.1,
-      max_tokens: 3000,
+      max_tokens: 4000, // Increased to accommodate exploit code
       venice_parameters: {
         include_venice_system_prompt: false
       }
@@ -331,3 +342,173 @@ export const assessInsurance = async (
     throw new Error('Failed to assess insurance risk. Please try again.');
   }
 };
+
+export const generateExploit = async (contractCode: string, vulnerabilityType: string): Promise<any> => {
+  console.log(`⭐ generateExploit called for vulnerability: ${vulnerabilityType}`);
+  
+  try {
+    // Check if API key is set
+    if (!process.env.REACT_APP_VENICE_API_KEY) {
+      console.error("❌ Venice API key is not set");
+      return { error: "API key is not configured. Set REACT_APP_VENICE_API_KEY environment variable." };
+    }
+    
+    const requestData: ChatCompletionRequestWithVenice = {
+      model: "default",
+      messages: [
+        {
+          role: "system",
+          content: `You are a smart contract security expert specializing in creating practical exploit tests. Generate a complete, executable Hardhat test file that demonstrates a ${vulnerabilityType} vulnerability in the provided smart contract.
+
+Your response should be a JSON object with this structure:
+{
+  "vulnerability_name": "Name of the vulnerability",
+  "description": "Detailed description of how the vulnerability works, including the exact lines of code that are vulnerable",
+  "exploit_code": "Core exploit logic shown as a concise code snippet",
+  "severity": "High, Medium, or Low",
+  "mitigation": "Detailed explanation of how to fix this vulnerability with code examples",
+  "hardhat_test": "Complete and fully functional Hardhat test file"
+}
+
+For the hardhat_test, include:
+1. All necessary imports for Hardhat, ethers, and chai
+2. A complete describe block with appropriate test structure
+3. Contract deployment with any required constructor arguments
+4. Complete account setup with appropriate signers/accounts
+5. All steps needed to execute the exploit (no placeholder/stub code)
+6. Clear assertions that verify the exploit was successful
+7. Comments explaining each step of the exploit
+8. Make all functions async/await compatible
+9. Ensure the vulnerable contract can be deployed correctly in Hardhat
+10. If the contract needs external dependencies, include mock implementations
+
+The test file must be executable as-is by running "npx hardhat test" in a standard Hardhat project that has the vulnerable contract in the contracts/ directory.`
+        },
+        {
+          role: "user",
+          content: `Generate a complete, executable Hardhat test file that exploits the ${vulnerabilityType} vulnerability in this contract:\n\n${contractCode}`
+        }
+      ],
+      temperature: 0.1, // Lower temperature for more focused output
+      max_tokens: 4000,
+      venice_parameters: {
+        include_venice_system_prompt: false
+      }
+    };
+
+    console.log("📤 Making API request for exploit generation");
+    const response = await openai.createChatCompletion(requestData as any);
+    
+    if (!response?.data?.choices?.[0]?.message?.content) {
+      throw new Error("Invalid response from API - no content found");
+    }
+
+    // Parse the response content as JSON
+    try {
+      const content = response.data.choices[0].message.content;
+      console.log("📥 Raw API response content (first 100 chars):", content.substring(0, 100));
+      
+      // If response is wrapped in markdown code blocks, extract it
+      const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || 
+                      content.match(/```\n([\s\S]*?)\n```/);
+      
+      let jsonContent = content;
+      if (jsonMatch) {
+        console.log("📋 Detected JSON inside markdown code block");
+        jsonContent = jsonMatch[1];
+      }
+      
+      const parsedResult = JSON.parse(jsonContent);
+      console.log("✅ Successfully parsed exploit response");
+      return parsedResult;
+    } catch (parseError) {
+      console.error("❌ Failed to parse API response as JSON:", parseError);
+      return {
+        error: "Failed to parse exploit generation results",
+        raw_response: response.data.choices[0].message.content
+      };
+    }
+  } catch (error: any) {
+    console.error("❌ Error in generateExploit:", error);
+    return {
+      error: `Failed to generate exploit code. ${error.message}`
+    };
+  }
+};
+
+/**
+ * Generates a complete Hardhat test file for a specific vulnerability
+ */
+export const generateHardhatTest = async (
+  contractCode: string, 
+  vulnerabilityType: string
+): Promise<string> => {
+  console.log(`⭐ generateHardhatTest called for vulnerability: ${vulnerabilityType}`);
+  
+  try {
+    // Check if API key is set
+    if (!process.env.REACT_APP_VENICE_API_KEY) {
+      console.error("❌ Venice API key is not set");
+      throw new Error("API key is not configured. Set REACT_APP_VENICE_API_KEY environment variable.");
+    }
+    
+    const requestData: ChatCompletionRequestWithVenice = {
+      model: "default",
+      messages: [
+        {
+          role: "system",
+          content: `You are a smart contract security expert specializing in creating Hardhat test files that exploit vulnerabilities. 
+          Your task is to create a SINGLE, SELF-CONTAINED Hardhat test file that demonstrates a ${vulnerabilityType} vulnerability in the provided smart contract.
+
+Follow these strict rules:
+1. Do NOT use markdown formatting in your response. Output ONLY the JavaScript code for the test file.
+2. The test file must be executable as-is with "npx hardhat test" in a standard Hardhat project.
+3. Include all required imports at the top (ethers, chai, etc.).
+4. Your test must deploy the vulnerable contract as part of the test.
+5. The test must trigger the vulnerability and prove it was successful with proper assertions.
+6. Include detailed comments explaining each step of the exploit.
+7. Do not include any placeholder or stub code - everything must be fully implemented.
+8. The test should pass when run and demonstrate the vulnerability.
+9. If the contract requires constructor arguments, include them.
+10. If the contract imports other contracts, handle them appropriately.
+
+Ensure your output is a COMPLETE JavaScript file (ending with .js) that can be saved directly to a Hardhat project's test folder and will actually expose the vulnerability when run.`
+        },
+        {
+          role: "user",
+          content: `Create a Hardhat test file that demonstrates the ${vulnerabilityType} vulnerability in this smart contract:\n\n${contractCode}`
+        }
+      ],
+      temperature: 0.1,
+      max_tokens: 4000,
+      venice_parameters: {
+        include_venice_system_prompt: false
+      }
+    };
+
+    console.log("📤 Making API request for Hardhat test generation");
+    const response = await openai.createChatCompletion(requestData as any);
+    
+    if (!response?.data?.choices?.[0]?.message?.content) {
+      throw new Error("Invalid response from API - no content found");
+    }
+
+    // Get the raw test content
+    const content = response.data.choices[0].message.content;
+    console.log("📥 Raw API response received (first 100 chars):", content.substring(0, 100));
+    
+    // Clean up the content - remove any markdown code blocks if present
+    let testCode = content.replace(/^```[\w-]*\n/m, '').replace(/\n```$/m, '');
+    
+    // Check if the test code includes a describe block
+    if (!testCode.includes('describe(')) {
+      console.warn("⚠️ Generated test doesn't contain a describe block - might not be valid Hardhat test");
+    }
+    
+    return testCode;
+  } catch (error: any) {
+    console.error("❌ Error in generateHardhatTest:", error);
+    throw new Error(`Failed to generate Hardhat test: ${error.message}`);
+  }
+};
+

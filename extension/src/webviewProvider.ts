@@ -57,6 +57,7 @@ export class SidebarWebViewProvider implements vscode.WebviewViewProvider {
     // Handle messages from the webview
     webviewView.webview.onDidReceiveMessage(message => {
       console.log('Received message from webview:', message);
+      
       switch (message.command) {
         case 'showInfo':
           vscode.window.showInformationMessage(message.text);
@@ -69,6 +70,21 @@ export class SidebarWebViewProvider implements vscode.WebviewViewProvider {
           break;
         case 'analyzeSelectedFiles':
           vscode.commands.executeCommand('testsidebarextension.analyzeMultipleFiles', message.fileNames);
+          break;
+        case 'downloadAllExploits':
+          vscode.commands.executeCommand(
+            'testsidebarextension.downloadAllExploits', 
+            message.vulnerabilityType, 
+            message.exploits
+          );
+          break;
+        case 'generateHardhatTest':
+          console.log('Executing generateHardhatTest command with:', message.vulnerabilityType);
+          vscode.commands.executeCommand(
+            'testsidebarextension.generateHardhatTest', 
+            message.vulnerabilityType, 
+            message.severity
+          );
           break;
       }
     });
