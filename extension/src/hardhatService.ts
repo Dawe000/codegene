@@ -5,9 +5,55 @@ import * as path from 'path';
 import * as net from 'net';
 import { getWorkspacePath } from './fileUtils';
 
-// Store node process for management
+// Store node process and state
 let nodeProcess: ChildProcess | null = null;
 let isNodeRunning: boolean = false;
+
+// Default Hardhat accounts - these are always available when running a local node
+export const DEFAULT_ACCOUNTS = [
+  {
+    privateKey: '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
+    address: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
+  },
+  {
+    privateKey: '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d',
+    address: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
+  },
+  {
+    privateKey: '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a',
+    address: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
+  },
+  {
+    privateKey: '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6',
+    address: '0x90F79bf6EB2c4f870365E785982E1f101E93b906'
+  },
+  {
+    privateKey: '0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a',
+    address: '0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65'
+  }
+];
+
+// Interface for node info
+export interface NodeInfo {
+  url: string;
+  accounts: typeof DEFAULT_ACCOUNTS;
+  isRunning: boolean;
+}
+
+// Interface for contract info
+export interface ContractInfo {
+  name: string;
+  address: string;
+  abi: any;
+}
+
+// Interface for deployment result
+export interface DeploymentResult {
+  success: boolean;
+  message: string;
+  nodeInfo?: NodeInfo;
+  contracts?: ContractInfo[];
+}
 
 // Check if a port is in use
 function isPortInUse(port: number): Promise<boolean> {
@@ -23,16 +69,22 @@ function isPortInUse(port: number): Promise<boolean> {
 }
 
 /**
+ * Gets the current Hardhat node information 
+ */
+export function getNodeInfo(): NodeInfo {
+  return {
+    url: 'http://localhost:8545',
+    accounts: DEFAULT_ACCOUNTS,
+    isRunning: isNodeActive()
+  };
+}
+
+/**
  * Starts a Hardhat node and deploys contracts
  * @param outputChannel VSCode output channel for logging
- * @returns Promise<{success: boolean, message: string, contractAddress?: string}>
+ * @returns Promise with deployment result
  */
-export async function startNodeAndDeploy(outputChannel: vscode.OutputChannel): Promise<{
-  success: boolean;
-  message: string;
-  contractAddresses?: string[];
-  nodeUrl?: string;
-}> {
+export async function startNodeAndDeploy(outputChannel: vscode.OutputChannel): Promise<DeploymentResult> {
   try {
     // Check if workspace is open
     const workspacePath = getWorkspacePath();
@@ -54,12 +106,16 @@ export async function startNodeAndDeploy(outputChannel: vscode.OutputChannel): P
     
     if (portInUse && !isNodeRunning) {
       outputChannel.appendLine("A node is already running on port 8545 (not managed by this extension). Using the existing node.");
+      isNodeRunning = true; // Treat external node as running for our purposes
     } else if (portInUse && isNodeRunning) {
       outputChannel.appendLine("A node started by this extension is already running.");
+      // Return immediately with node info and any deployed contracts
+      const deploymentInfo = await getDeploymentInfo(workspacePath);
       return { 
         success: true, 
-        message: 'Node is already running', 
-        nodeUrl: 'http://localhost:8545' 
+        message: 'Node is already running',
+        nodeInfo: getNodeInfo(),
+        contracts: deploymentInfoToContractArray(deploymentInfo)
       };
     } else {
       // Start a local Hardhat node
@@ -144,18 +200,20 @@ export async function startNodeAndDeploy(outputChannel: vscode.OutputChannel): P
             });
           } else {
             outputChannel.appendLine("No deployment scripts found in scripts directory.");
+            // We're returning early but still include account info
             return { 
               success: true, 
               message: 'Node started but no deploy scripts found. Contracts were not deployed.',
-              nodeUrl: 'http://localhost:8545'
+              nodeInfo: getNodeInfo()
             };
           }
         } else {
           outputChannel.appendLine("No scripts directory found for deployment.");
+          // We're returning early but still include account info
           return { 
             success: true, 
             message: 'Node started but no deploy scripts found. Contracts were not deployed.',
-            nodeUrl: 'http://localhost:8545'
+            nodeInfo: getNodeInfo()
           };
         }
       }
@@ -163,46 +221,34 @@ export async function startNodeAndDeploy(outputChannel: vscode.OutputChannel): P
       outputChannel.appendLine("Deployment completed successfully");
     } catch (error: any) {
       outputChannel.appendLine(`Deployment failed: ${error.message}`);
-      // Node is running but deployment failed
+      // We're returning early but still include account info
       return { 
         success: true, 
         message: 'Node started but deployment failed. See output for details.',
-        nodeUrl: 'http://localhost:8545'
+        nodeInfo: getNodeInfo()
       };
     }
 
-    // Step 3: Check for the deployment file if using hardhat-deploy
-    const deploymentDir = path.join(workspacePath, 'deployments', 'localhost');
-    const contractAddresses: string[] = [];
+    // Step 3: Get deployment information
+    const deploymentInfo = await getDeploymentInfo(workspacePath);
     
-    if (fs.existsSync(deploymentDir)) {
-      outputChannel.appendLine(`Looking for deployment artifacts in: ${deploymentDir}`);
-      
-      const files = fs.readdirSync(deploymentDir).filter(f => f.endsWith('.json'));
-      outputChannel.appendLine(`Found deployment files: ${files.join(', ')}`);
-      
-      for (const file of files) {
-        try {
-          const deploymentPath = path.join(deploymentDir, file);
-          const deploymentData = JSON.parse(fs.readFileSync(deploymentPath, 'utf8'));
-          const contractName = file.replace('.json', '');
-          const contractAddress = deploymentData.address;
-          
-          outputChannel.appendLine(`Contract ${contractName} deployed at address: ${contractAddress}`);
-          contractAddresses.push(`${contractName}: ${contractAddress}`);
-        } catch (err) {
-          outputChannel.appendLine(`Error reading deployment file ${file}: ${err}`);
-        }
-      }
+    // Convert deployment info to the contract array format
+    const contracts = deploymentInfoToContractArray(deploymentInfo);
+    
+    if (contracts.length > 0) {
+      contracts.forEach(contract => {
+        outputChannel.appendLine(`Contract ${contract.name} deployed at address: ${contract.address}`);
+      });
     } else {
-      outputChannel.appendLine("No deployment artifacts directory found. This is normal if not using hardhat-deploy.");
+      outputChannel.appendLine("No deployed contracts found in standard locations.");
     }
 
+    // Return node info and contract details
     return {
       success: true,
       message: 'Hardhat node started and contracts deployed successfully',
-      contractAddresses: contractAddresses,
-      nodeUrl: 'http://localhost:8545'
+      nodeInfo: getNodeInfo(),
+      contracts: contracts
     };
   } catch (error: any) {
     return {
@@ -230,4 +276,100 @@ export function stopNode(): boolean {
  */
 export function isNodeActive(): boolean {
   return isNodeRunning && nodeProcess !== null && !nodeProcess.killed;
+}
+
+/**
+ * Gets information about deployed contracts
+ */
+export async function getDeploymentInfo(workspacePath: string): Promise<{
+  contractNames: string[];
+  contractAddresses: {[name: string]: string};
+  contractAbis: {[name: string]: any};
+}> {
+  const deploymentDir = path.join(workspacePath, 'deployments', 'localhost');
+  const contractNames: string[] = [];
+  const contractAddresses: {[name: string]: string} = {};
+  const contractAbis: {[name: string]: any} = {};
+  
+  if (fs.existsSync(deploymentDir)) {
+    const files = fs.readdirSync(deploymentDir).filter(f => f.endsWith('.json'));
+    
+    for (const file of files) {
+      try {
+        const deploymentPath = path.join(deploymentDir, file);
+        const deploymentData = JSON.parse(fs.readFileSync(deploymentPath, 'utf8'));
+        const contractName = file.replace('.json', '');
+        
+        contractNames.push(contractName);
+        contractAddresses[contractName] = deploymentData.address;
+        contractAbis[contractName] = deploymentData.abi;
+      } catch (err) {
+        console.error(`Error reading deployment file ${file}:`, err);
+      }
+    }
+  }
+
+  // Also check artifacts directory for any deployed contracts if deployment directory doesn't exist
+  if (contractNames.length === 0) {
+    try {
+      const artifactsDir = path.join(workspacePath, 'artifacts', 'contracts');
+      if (fs.existsSync(artifactsDir)) {
+        // Try to find deployed contracts by checking recent contracts.json or other indicators
+        // This is a fallback when hardhat-deploy isn't used
+        // For now, this is just a placeholder
+      }
+    } catch (err) {
+      console.error('Error checking artifacts directory:', err);
+    }
+  }
+  
+  return {
+    contractNames,
+    contractAddresses,
+    contractAbis
+  };
+}
+
+/**
+ * Converts deployment info to an array of contract info objects
+ */
+function deploymentInfoToContractArray(deploymentInfo: {
+  contractNames: string[];
+  contractAddresses: {[name: string]: string};
+  contractAbis: {[name: string]: any};
+}): ContractInfo[] {
+  const contracts: ContractInfo[] = [];
+  
+  for (const name of deploymentInfo.contractNames) {
+    if (deploymentInfo.contractAddresses[name] && deploymentInfo.contractAbis[name]) {
+      contracts.push({
+        name,
+        address: deploymentInfo.contractAddresses[name],
+        abi: deploymentInfo.contractAbis[name]
+      });
+    }
+  }
+  
+  return contracts;
+}
+
+/**
+ * Returns all available information for transaction creation
+ */
+export async function getTransactionInfo(): Promise<{
+  nodeInfo: NodeInfo;
+  contracts: ContractInfo[];
+}> {
+  const workspacePath = getWorkspacePath();
+  if (!workspacePath) {
+    return { nodeInfo: getNodeInfo(), contracts: [] };
+  }
+  
+  const deploymentInfo = await getDeploymentInfo(workspacePath);
+  const contracts = deploymentInfoToContractArray(deploymentInfo);
+  
+  return {
+    nodeInfo: getNodeInfo(),
+    contracts: contracts
+  };
 }

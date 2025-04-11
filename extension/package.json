@@ -54,10 +54,6 @@
         "title": "Analyze Smart Contract"
       },
       {
-        "command": "testsidebarextension.generateExploit",
-        "title": "Generate Security Exploit"
-      },
-      {
         "command": "testsidebarextension.analyzeAllContracts",
         "title": "Analyze All Hardhat Contracts"
       },
@@ -68,6 +64,14 @@
       {
         "command": "testsidebarextension.stopNode",
         "title": "Stop Hardhat Node"
+      },
+      {
+        "command": "testsidebarextension.getContractInfo",
+        "title": "Get Deployed Contract Info"
+      },
+      {
+        "command": "testsidebarextension.getAccountInfo",
+        "title": "Get Hardhat Account Info"
       }
     ],
     "menus": {
@@ -119,6 +123,7 @@
   },
   "dependencies": {
     "dotenv": "^16.4.7",
+    "ethers": "^6.13.5",
     "openai": "^3.3.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"

@@ -14,8 +14,6 @@ export class SidebarWebViewProvider implements vscode.WebviewViewProvider {
     // Store the webview reference
     this.webview = webviewView.webview;
 
-    console.log('Resolving webview view for mySidebar');
-    
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [this._extensionUri]
@@ -30,9 +28,6 @@ export class SidebarWebViewProvider implements vscode.WebviewViewProvider {
       vscode.Uri.joinPath(this._extensionUri, 'media', 'tailwind.css')
     );
     
-    console.log('Script URI:', scriptUri.toString());
-    console.log('CSS URI:', tailwindCssUri.toString());
-    
     // Create a basic HTML that will load our React app
     webviewView.webview.html = `
       <!DOCTYPE html>
@@ -40,12 +35,8 @@ export class SidebarWebViewProvider implements vscode.WebviewViewProvider {
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Sidebar Example</title>
+        <title>Smart Contract Analyzer</title>
         <link rel="stylesheet" href="${tailwindCssUri}">
-        <style>
-          /* Fallback styles in case the Tailwind CSS doesn't load */
-          body { padding: 10px; font-family: system-ui; }
-        </style>
       </head>
       <body>
         <div id="root">Loading...</div>
@@ -56,7 +47,7 @@ export class SidebarWebViewProvider implements vscode.WebviewViewProvider {
     
     // Handle messages from the webview
     webviewView.webview.onDidReceiveMessage(message => {
-      console.log('Received message from webview:', message);
+      console.log('Received message from webview:', message.command);
       
       switch (message.command) {
         case 'showInfo':
@@ -71,31 +62,13 @@ export class SidebarWebViewProvider implements vscode.WebviewViewProvider {
         case 'analyzeSelectedFiles':
           vscode.commands.executeCommand('testsidebarextension.analyzeMultipleFiles', message.fileNames);
           break;
-        case 'downloadAllExploits':
-          vscode.commands.executeCommand(
-            'testsidebarextension.downloadAllExploits', 
-            message.vulnerabilityType, 
-            message.exploits
-          );
-          break;
-        case 'generateHardhatTest':
-          console.log('Executing generateHardhatTest command with:', message.vulnerabilityType);
-          vscode.commands.executeCommand(
-            'testsidebarextension.generateHardhatTest', 
-            message.vulnerabilityType, 
-            message.severity
-          );
-          break;
         case 'analyzeAllContracts':
-          console.log('Executing analyzeAllContracts command');
           vscode.commands.executeCommand('testsidebarextension.analyzeAllContracts');
           break;
         case 'startNodeAndDeploy':
-          console.log('Executing startNodeAndDeploy command');
           vscode.commands.executeCommand('testsidebarextension.startNodeAndDeploy');
           break;
         case 'stopNode':
-          console.log('Executing stopNode command');
           vscode.commands.executeCommand('testsidebarextension.stopNode');
           break;
       }

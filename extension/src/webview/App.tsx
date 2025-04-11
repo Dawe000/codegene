@@ -2,7 +2,8 @@ import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { vscode } from './vscodeApi'; // Import from the shared file
 
-import ExploitCode from './ExploitCode';
+// Change this import to use the renamed component
+import VulnerabilityCard from './VulnerabilityCard';
 
 interface AppProps {
   vscode: any;
@@ -62,59 +63,6 @@ const LoadingPulse: React.FC = () => (
     ))}
   </div>
 );
-
-const HardhatInstructions: React.FC = () => {
-  const [showInstructions, setShowInstructions] = useState(false);
-  
-  return (
-    <div className="mb-6 bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 overflow-hidden">
-      <div 
-        className="bg-gradient-to-r from-slate-800 to-slate-800/50 px-6 py-4 border-b border-slate-700/50 flex items-center justify-between cursor-pointer"
-        onClick={() => setShowInstructions(!showInstructions)}
-      >
-        <span className="text-sm font-medium flex items-center gap-2">
-          <span className="text-cyan-400">🛠️</span> Hardhat Test Environment Setup
-        </span>
-        <span>{showInstructions ? '▼' : '▶'}</span>
-      </div>
-      
-      {showInstructions && (
-        <div className="p-6">
-          <p className="text-sm text-slate-300 mb-4">
-            To run the exploit tests, you'll need a Hardhat environment. Follow these steps:
-          </p>
-          
-          <ol className="space-y-3 text-sm text-slate-300 list-decimal pl-5">
-            <li>
-              <p>Create a new directory for your Hardhat project:</p>
-              <pre className="bg-slate-900 p-3 rounded-lg mt-2 text-xs">mkdir exploit-test && cd exploit-test</pre>
-            </li>
-            <li>
-              <p>Initialize a new npm project and install Hardhat:</p>
-              <pre className="bg-slate-900 p-3 rounded-lg mt-2 text-xs">npm init -y
-npm install --save-dev hardhat @nomicfoundation/hardhat-toolbox</pre>
-            </li>
-            <li>
-              <p>Initialize Hardhat:</p>
-              <pre className="bg-slate-900 p-3 rounded-lg mt-2 text-xs">npx hardhat init</pre>
-              <p className="mt-2">Select "Create a JavaScript project" when prompted.</p>
-            </li>
-            <li>
-              <p>Copy the vulnerable smart contract to the <code className="bg-slate-800 px-2 py-0.5 rounded">contracts/</code> directory.</p>
-            </li>
-            <li>
-              <p>Save the exploit test file to the <code className="bg-slate-800 px-2 py-0.5 rounded">test/</code> directory.</p>
-            </li>
-            <li>
-              <p>Run the test:</p>
-              <pre className="bg-slate-900 p-3 rounded-lg mt-2 text-xs">npx hardhat test</pre>
-            </li>
-          </ol>
-        </div>
-      )}
-    </div>
-  );
-};
 
 const HardhatControls: React.FC<{ isProjectDetected: boolean }> = ({ isProjectDetected }) => {
   const [nodeStatus, setNodeStatus] = useState<'stopped' | 'running' | 'starting'>('stopped');
@@ -303,6 +251,8 @@ const App: React.FC<AppProps> = () => {
     });
   };
 
+
+
   const renderCategorySection = (title: string, data: any) => {
     if (!data) {
       return (
@@ -334,30 +284,11 @@ const App: React.FC<AppProps> = () => {
                 </div>
               ))}
               
-              {/* Display exploits */}
-              {data.exploits && data.exploits.map((exploit: any, index: number) => (
-                <ExploitCode key={index} exploit={exploit} />
+              {/* Update to use the renamed VulnerabilityCard component */}
+              {data.exploits && data.exploits.map((vulnerability: any, index: number) => (
+                <VulnerabilityCard key={index} vulnerability={vulnerability} />
               ))}
             </div>
-
-            {/* Add a download all button if there are multiple exploits */}
-            {data.exploits && data.exploits.length > 1 && (
-              <div className="mt-4 flex justify-end">
-                <button
-                  onClick={() => {
-                    vscode.postMessage({
-                      command: 'downloadAllExploits',
-                      exploits: data.exploits,
-                      vulnerabilityType: title,
-                      fromHardhatAnalysis: true
-                    });
-                  }}
-                  className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-md text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-cyan-500/20 transition-all"
-                >
-                  <span>⬇️</span> Download All Exploits As One File
-                </button>
-              </div>
-            )}
           </div>
         </div>
       );
@@ -495,11 +426,6 @@ const App: React.FC<AppProps> = () => {
         </div>
       )}
 
-      {/* Hardhat Instructions */}
-      {analysis && analysis.vulnerabilities && analysis.vulnerabilities.exploits && analysis.vulnerabilities.exploits.length > 0 && (
-        <HardhatInstructions />
-      )}
-
       {/* Hardhat Controls */}
       <HardhatControls isProjectDetected={projectDetected} />
 
@@ -508,6 +434,11 @@ const App: React.FC<AppProps> = () => {
         <div className="mb-8">
           <div className="mb-6 flex items-center justify-between">
             <h4 className="text-xl font-bold text-slate-200">Analysis Results</h4>
+            {analysis.offline_mode && (
+              <div className="px-3 py-1 bg-amber-500/30 text-amber-400 border border-amber-500/50 rounded-full text-xs">
+                Offline Mode
+              </div>
+            )}
             {typeof analysis.overall_score === 'number' && (
               <div className="flex items-center bg-slate-800/50 backdrop-blur-sm py-2 px-6 rounded-full border border-slate-700/50">
                 <span className="mr-3 text-slate-400">Overall Score</span>
@@ -529,6 +460,11 @@ const App: React.FC<AppProps> = () => {
                 Error Occurred
               </div>
               <div className="text-red-300">{analysis.error}</div>
+              {analysis.error_info && (
+                <div className="mt-4 text-amber-400 text-sm">
+                  <strong>Details:</strong> {analysis.error_info}
+                </div>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
