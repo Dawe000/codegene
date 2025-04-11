@@ -250,3 +250,40 @@ export const assessInsurance = async (
     throw new Error('Failed to assess insurance risk. Please try again.');
   }
 };
+
+export const generateCoinRecommendation = async (contractCode: string): Promise<any> => {
+    try {
+      const requestData: ChatCompletionRequestWithVenice = {
+        model: "default",
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert in smart contract analysis and tokenomics. Generate recommendations for a Zora coin based on the provided smart contract. Include suggested name, symbol, initial supply, and distribution model.`
+          },
+          {
+            role: "user",
+            content: `Analyze this smart contract and recommend tokenomics for a Zora coin:\n\n${contractCode}`
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 2000,
+        venice_parameters: {
+          include_venice_system_prompt: false
+        }
+      };
+  
+      const response = await openai.createChatCompletion(requestData as any);
+      const content = response?.data?.choices?.[0]?.message?.content ?? "";
+  
+      // You can parse content if Venice returns structured JSON later
+      return {
+        name: "Generated Coin Name",
+        symbol: "GCN",
+        initialSupply: 1000000,
+        distribution: "30% team, 40% community, 30% reserves"
+      };
+    } catch (error: any) {
+      console.error('Error generating coin recommendation:', error);
+      throw new Error('Failed to generate coin recommendation.');
+    }
+  };

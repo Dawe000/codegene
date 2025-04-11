@@ -4,7 +4,7 @@ import { InjectedConnector } from '@web3-react/injected-connector';
 import { useWeb3React } from '@web3-react/core';
 
 // Define supported chain IDs
-const SUPPORTED_CHAIN_IDS = [1,421614, 137, 42161, 10]; // Mainnet, Sepolia, Arbitrum Sepolia
+const SUPPORTED_CHAIN_IDS = [1,421614, 137, 42161, 10, 8453, 84532]; // Mainnet, Sepolia, Arbitrum Sepolia, Base, Base Sepolia for Zora
 
 // Create injected connector
 export const injectedConnector = new InjectedConnector({
@@ -53,6 +53,8 @@ export const Web3Provider: React.FC<{ children: React.ReactNode }> = ({ children
       137: 'Polygon',
       42161: 'Arbitrum',
       10: 'Optimism',
+      8453: 'Base', 
+      84532: 'Base Sepolia',
     };
     return chainNames[chainId] || `Chain #${chainId}`;
   };

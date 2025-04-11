@@ -7,6 +7,7 @@ import AuditTab from './tabs/AuditTab';
 import TranslateTab from '././tabs/TranslateTab';
 import InsuranceTab from './tabs/InsuranceTab';
 import SubscriptionTab from './tabs/subscribstionTab';
+import ZoraCoinsTab from './tabs/ZoraCoinsTab';
 //import InsuranceTab from './tabs/InsuranceTab';
 //import SubscriptionTab from './tabs/subscribstionTab';
 
@@ -64,6 +65,7 @@ const AuditorTabs = () => {
           <Tab icon={<SecurityIcon />} label="AUDIT" {...a11yProps(1)} />
           <Tab icon={<CodeIcon />} label="INSURANCE" {...a11yProps(2)} />
           <Tab icon={<SecurityIcon />} label="SUBSCRIPTION" {...a11yProps(3)} />
+          <Tab icon={<SecurityIcon />} label="ZORA COINS" {...a11yProps(4)} />
         </Tabs>
       </Box>
       
@@ -77,6 +79,10 @@ const AuditorTabs = () => {
 
       <TabPanel value={value} index={3}>
         <SubscriptionTab />
+      </TabPanel>
+
+      <TabPanel value={value} index={4}>
+        <ZoraCoinsTab />
       </TabPanel>
        
       <TabPanel value={value} index={2}>
