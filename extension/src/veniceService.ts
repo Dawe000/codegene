@@ -162,7 +162,7 @@ export const analyzeContract = async (contractCode: string): Promise<any> => {
           `API responded with error: ${error.response.status} - ${error.response.statusText}`
         );
       } else if (error.request) {
-        // The request was made but no response was received
+        // The request was made but no response was was received
         console.log("🔄 No response received. Likely a timeout or network issue. Falling back to local analysis.");
         return generateOfflineAnalysisResult(
           "No response received from API. Please check your network connection.",
@@ -405,6 +405,307 @@ export const assessInsurance = async (
       offline_mode: true,
       risk_level: "Medium",
       premium_percentage: 5
+    };
+  }
+};
+
+/**
+ * Generates a TypeScript penetration test for a smart contract
+ * 
+ * @param contractCode The source code of the contract to test
+ * @param contractName The name of the contract
+ * @param vulnerabilityType Optional specific vulnerability to target
+ * @param customPrompt Optional custom prompt for the test generation
+ * @returns Promise with result containing the file path and test information
+ */
+export const generatePenetrationTest = async (
+  contractCode: string,
+  contractName: string,
+  vulnerabilityType?: string,
+  customPrompt?: string
+): Promise<{success: boolean; filePath?: string; error?: string}> => {
+  try {
+    if (!process.env.REACT_APP_VENICE_API_KEY) {
+      console.error("❌ Venice API key is not set");
+      throw new Error("API key is not configured. Set REACT_APP_VENICE_API_KEY environment variable.");
+    }
+
+    console.log(`⭐ Generating penetration test for ${contractName}${vulnerabilityType ? ` targeting ${vulnerabilityType}` : ''}`);
+    console.log(`Contract code length: ${contractCode.length} characters`);
+    console.log(`First 200 chars: ${contractCode.substring(0, 200).replace(/\n/g, '\\n')}...`);
+    
+    // Replace the systemPrompt in generatePenetrationTest with this improved version
+    const systemPrompt = `You are an expert in smart contract security and penetration testing. 
+Create a standalone TypeScript file that performs penetration testing on the provided smart contract.
+
+IMPORTANT - Create a SELF-CONTAINED test file that works with Hardhat:
+
+1. Use ONLY these imports:
+   \`\`\`typescript
+   import { ethers } from "hardhat";
+   import { expect } from "chai";
+   \`\`\`
+
+2. DO NOT try to use a separate attacker contract. Instead:
+   - Create attack functions directly in the test
+   - Use multiple Hardhat signers (accounts) for different roles
+   - Interact directly with the vulnerable contract
+
+3. FOCUS on testing ONE specific vulnerability type per test:
+   - Reentrancy
+   - Access control issues
+   - Integer overflow/underflow
+   - Front-running
+   - Logic errors
+
+Here's the format to follow:
+
+\`\`\`typescript
+// FILENAME: penetrationTest-[ContractName]-[VulnerabilityType].ts
+
+import { ethers } from "hardhat";
+import { expect } from "chai";
+
+/**
+ * Penetration Test: [Vulnerability Name]
+ * Target Contract: [Contract Name]
+ * 
+ * Description: Detailed explanation of the vulnerability
+ */
+
+describe("[Vulnerability Name] Penetration Test", function() {
+  // Increase timeout for complex tests
+  this.timeout(60000);
+  
+  // Deploy all contracts needed for the test
+  it("should successfully exploit the vulnerability", async function() {
+    // Get signers
+    const [owner, attacker, user1, user2] = await ethers.getSigners();
+    
+    console.log("Owner address:", owner.address);
+    console.log("Attacker address:", attacker.address);
+    
+    // Deploy the vulnerable contract
+    console.log("Deploying vulnerable contract...");
+    const VulnerableContract = await ethers.getContractFactory("YourContract");
+    const vulnerableContract = await VulnerableContract.deploy(/* constructor args if any */);
+    await vulnerableContract.waitForDeployment();
+    
+    const contractAddress = await vulnerableContract.getAddress();
+    console.log("Vulnerable contract deployed at:", contractAddress);
+    
+    // Set up the environment for the exploit
+    // e.g., send funds to the contract
+    await owner.sendTransaction({
+      to: contractAddress,
+      value: ethers.parseEther("1.0")
+    });
+    
+    // EXPLOIT IMPLEMENTATION
+    console.log("Executing exploit...");
+    
+    // Example for reentrancy: Create a series of transactions with specific conditions
+    const initialAttackerBalance = await ethers.provider.getBalance(attacker.address);
+    console.log("Initial attacker balance:", ethers.formatEther(initialAttackerBalance));
+    
+    // Step 1: Attacker interacts with the contract
+    await vulnerableContract.connect(attacker).someFunction({ value: ethers.parseEther("0.1") });
+    
+    // Step 2: Execute the attack
+    await vulnerableContract.connect(attacker).withdrawFunds();  // Or whatever vulnerable function exists
+    
+    // Verification
+    console.log("Verifying exploit results...");
+    
+    // Add assertions to verify the exploit worked
+    const finalAttackerBalance = await ethers.provider.getBalance(attacker.address);
+    console.log("Final attacker balance:", ethers.formatEther(finalAttackerBalance));
+    
+    // Use chai assertions
+    expect(await ethers.provider.getBalance(contractAddress)).to.equal(0n);
+    expect(finalAttackerBalance).to.be.gt(initialAttackerBalance);
+  });
+});
+
+// Function to execute the test (optional - used when running directly)
+export async function runPenetrationTest() {
+  try {
+    // This will be run by Mocha when using 'npx hardhat test'
+    console.log("Run this test with: npx hardhat test");
+    return { success: true };
+  } catch (error) {
+    console.error("Penetration test failed:", error);
+    return { success: false, error: error.message };
+  }
+}
+\`\`\`
+
+IMPORTANT NOTES:
+1. DO NOT try to deploy any contracts besides the main contract that's already in the project
+2. DO NOT use ethers.utils (it's deprecated) - use ethers.parseEther() and similar
+3. Call waitForDeployment() after deploying contracts
+4. Ensure all contract function calls use the correct syntax for ethers v6
+5. Ethers v6 uses BigInt for numbers - use 0n for zero and handle comparison appropriately
+
+The focus should be on demonstrating how to exploit the vulnerability in the simplest way possible.`;
+
+    const requestData: ChatCompletionRequestWithVenice = {
+      model: "default",
+      messages: [
+        {
+          role: "system",
+          content: systemPrompt
+        },
+        {
+          role: "user",
+          content: customPrompt 
+            ? `${customPrompt}\n\nContract Code:\n\n${contractCode}`
+            : `Analyze this smart contract for vulnerabilities and create a penetration test${vulnerabilityType ? ` targeting ${vulnerabilityType}` : ''}:\n\n${contractCode}`
+        }
+      ],
+      temperature: 0.1,
+      max_tokens: 4000,
+      venice_parameters: {
+        include_venice_system_prompt: false
+      }
+    };
+
+    console.log("📤 Making API request for penetration test generation");
+    const response = await openai.createChatCompletion(requestData as any);
+    
+    if (!response?.data?.choices?.[0]?.message?.content) {
+      throw new Error("Invalid response from API - no content found");
+    }
+
+    // Get the generated test content
+    const content = response.data.choices[0].message.content;
+    console.log(`📥 Raw API response received with length: ${content.length} characters`);
+    console.log(`Response content first 200 chars: ${content.substring(0, 200).replace(/\n/g, '\\n')}...`);
+    
+    // Extract the filename from the content if available
+    let filename = `penetrationTest-${contractName}-${Date.now()}.ts`;
+    const filenameMatch = content.match(/FILENAME: ([a-zA-Z0-9_\-\.]+\.ts)/);
+    if (filenameMatch && filenameMatch[1]) {
+      filename = filenameMatch[1];
+    }
+    
+    // Extract the actual TypeScript code
+    const codeMatch = content.match(/```typescript\n([\s\S]*?)\n```/) || 
+                      content.match(/```ts\n([\s\S]*?)\n```/) || 
+                      content.match(/```\n([\s\S]*?)\n```/);
+                      
+    let testCode = content;
+    if (codeMatch && codeMatch[1]) {
+      testCode = codeMatch[1];
+    }
+    
+    // Make sure we don't save the "FILENAME:" comment if it's in the code
+    testCode = testCode.replace(/\/\/ FILENAME:.*\n/, '');
+    
+    // Save the file to the workspace
+    const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspacePath) {
+      throw new Error("No workspace open");
+    }
+    
+    // Create test directory if it doesn't exist
+    const testDir = path.join(workspacePath, 'test');
+    if (!fs.existsSync(testDir)) {
+      fs.mkdirSync(testDir, { recursive: true });
+    }
+    
+    const filePath = path.join(testDir, filename);
+    fs.writeFileSync(filePath, testCode);
+    console.log(`💾 Full test code written to file (${testCode.length} characters)`);
+    
+    console.log(`✅ Penetration test saved to ${filePath}`);
+    
+    return {
+      success: true,
+      filePath
+    };
+    
+  } catch (error: any) {
+    console.error("❌ Error generating penetration test:", error);
+    console.error("Error details:", error.stack || "No stack trace available");
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
+/**
+ * Generates multiple penetration tests based on detected vulnerabilities
+ * 
+ * @param contractCode The source code of the contract to test
+ * @param contractName The name of the contract
+ * @param vulnerabilities Array of vulnerabilities detected in analysis
+ * @returns Promise with array of test results
+ */
+export const generateMultiplePenetrationTests = async (
+  contractCode: string,
+  contractName: string,
+  vulnerabilities: {name: string, description: string, severity: string}[]
+): Promise<{success: boolean; tests: {vulnerability: string, filePath: string, success?: boolean, output?: string}[]; error?: string}> => {
+  try {
+    console.log(`⭐ Generating ${vulnerabilities.length} penetration tests for ${contractName}`);
+    
+    // Array to store test results
+    const tests: {vulnerability: string, filePath: string, success?: boolean, output?: string}[] = [];
+    
+    // Generate a test for each vulnerability
+    for (const vulnerability of vulnerabilities) {
+      console.log(`Generating test for vulnerability: ${vulnerability.name}`);
+      
+      try {
+        // Prepare a more specific prompt for this vulnerability
+        const specificPrompt = `Based on the following vulnerability: "${vulnerability.name}" - ${vulnerability.description}
+        
+        Create a penetration test that specifically exploits this vulnerability. Focus on a 
+        targeted test that clearly demonstrates how the vulnerability can be exploited.`;
+        
+        // Generate the test
+        const result = await generatePenetrationTest(
+          contractCode, 
+          contractName, 
+          vulnerability.name
+        );
+        
+        if (result.success && result.filePath) {
+          tests.push({
+            vulnerability: vulnerability.name,
+            filePath: result.filePath
+          });
+        } else {
+          console.error(`Failed to generate test for ${vulnerability.name}: ${result.error}`);
+        }
+      } catch (error: any) {
+        console.error(`Error generating test for ${vulnerability.name}:`, error);
+      }
+      
+      // Add a small delay between API calls to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    
+    if (tests.length === 0) {
+      return {
+        success: false,
+        tests: [],
+        error: "Could not generate any penetration tests"
+      };
+    }
+    
+    return {
+      success: true,
+      tests
+    };
+  } catch (error: any) {
+    console.error("❌ Error generating multiple penetration tests:", error);
+    return {
+      success: false,
+      tests: [],
+      error: error.message
     };
   }
 };

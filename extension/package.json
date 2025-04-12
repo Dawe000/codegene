@@ -72,6 +72,10 @@
       {
         "command": "testsidebarextension.getAccountInfo",
         "title": "Get Hardhat Account Info"
+      },
+      {
+        "command": "testsidebarextension.generatePenetrationTest",
+        "title": "Generate Smart Contract Penetration Test"
       }
     ],
     "menus": {
@@ -79,6 +83,11 @@
         {
           "when": "resourceExtname == .sol || resourceExtname == .rs",
           "command": "testsidebarextension.analyzeContract",
+          "group": "navigation"
+        },
+        {
+          "when": "resourceExtname == .sol || resourceExtname == .rs",
+          "command": "testsidebarextension.generatePenetrationTest",
           "group": "navigation"
         }
       ],

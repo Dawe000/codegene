@@ -2,9 +2,10 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import { spawn } from 'child_process';
 import { SidebarWebViewProvider } from './webviewProvider';
 import { getSolAndRustFileNames, getGroupedFileNames } from './fileNameUtils';
-import { analyzeContract } from './veniceService';
+import { analyzeContract, generatePenetrationTest, generateMultiplePenetrationTests } from './veniceService';
 import * as fileUtils from './fileUtils';
 import * as hardhatService from './hardhatService';
 
@@ -188,7 +189,343 @@ export function activate(context: vscode.ExtensionContext) {
       } catch (error: any) {
         vscode.window.showErrorMessage(`Error: ${error.message}`);
       }
-    })
+    }),
+
+    // Generate penetration test command
+    vscode.commands.registerCommand('testsidebarextension.generatePenetrationTest', async () => {
+      try {
+        // Get the active editor
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+          vscode.window.showWarningMessage('No file is currently open');
+          return;
+        }
+        
+        const document = editor.document;
+        const fileName = document.fileName;
+        
+        // Check if the file is a Solidity or Rust file
+        if (!fileName.endsWith('.sol') && !fileName.endsWith('.rs')) {
+          vscode.window.showWarningMessage('Only Solidity (.sol) and Rust (.rs) files can be analyzed');
+          return;
+        }
+        
+        // Get the file content
+        const fileContent = document.getText();
+        const contractName = path.basename(fileName, path.extname(fileName));
+        
+        // Show quick pick for vulnerability types
+        const vulnerabilityTypes = [
+          'Reentrancy', 
+          'Integer Overflow/Underflow', 
+          'Access Control', 
+          'Unchecked Return Values', 
+          'Front-Running',
+          'Timestamp Dependence',
+          'All Vulnerabilities'
+        ];
+        
+        const selectedVulnerability = await vscode.window.showQuickPick(vulnerabilityTypes, {
+          placeHolder: 'Select vulnerability type to target (or cancel for general testing)'
+        });
+        
+        // Show progress notification
+        vscode.window.withProgress({
+          location: vscode.ProgressLocation.Notification,
+          title: "Generating Smart Contract Penetration Test",
+          cancellable: false
+        }, async (progress) => {
+          progress.report({ increment: 0 });
+          
+          // Generate the penetration test
+          const result = await generatePenetrationTest(
+            fileContent, 
+            contractName, 
+            selectedVulnerability !== 'All Vulnerabilities' ? selectedVulnerability : undefined
+          );
+          
+          progress.report({ increment: 100 });
+          
+          if (result.success && result.filePath) {
+            const openFile = 'Open Test File';
+            const response = await vscode.window.showInformationMessage(
+              `Penetration test generated successfully at ${result.filePath}`, 
+              openFile
+            );
+            
+            if (response === openFile) {
+              const fileUri = vscode.Uri.file(result.filePath);
+              await vscode.window.showTextDocument(fileUri);
+            }
+          } else {
+            vscode.window.showErrorMessage(`Failed to generate penetration test: ${result.error}`);
+          }
+        });
+        
+      } catch (error: any) {
+        console.error('Error generating penetration test:', error);
+        vscode.window.showErrorMessage(`Error: ${error.message}`);
+      }
+    }),
+
+    // Generate and run penetration test command
+    vscode.commands.registerCommand('testsidebarextension.generateAndRunPenetrationTest', async () => {
+      try {
+        // Check if we have analyzed code available
+        if (!lastAnalyzedCode || lastAnalyzedCode.length === 0) {
+          // Try to load from temp file if available
+          try {
+            if (fs.existsSync(TEMP_FILE_PATH)) {
+              lastAnalyzedCode = fs.readFileSync(TEMP_FILE_PATH, 'utf8');
+              console.log(`[generateAndRunPenetrationTest] Loaded ${lastAnalyzedCode.length} characters from temp file`);
+            }
+          } catch (err) {
+            console.error('Error loading from temp file:', err);
+          }
+          
+          if (!lastAnalyzedCode || lastAnalyzedCode.length === 0) {
+            vscode.window.showErrorMessage('No contract code available. Please analyze contracts first.');
+            return;
+          }
+        }
+        
+        // Log the contract code for debugging
+        console.log('========= CONTRACT CODE FOR PENETRATION TEST =========');
+        console.log(lastAnalyzedCode);
+        console.log('=====================================================');
+        
+        // Show progress notification
+        vscode.window.withProgress({
+          location: vscode.ProgressLocation.Notification,
+          title: "Generating & Running Penetration Test",
+          cancellable: false
+        }, async (progress) => {
+          // Update UI
+          if (provider && provider.webview) {
+            provider.webview.postMessage({
+              command: 'startLoading'
+            });
+          }
+          
+          progress.report({ increment: 20, message: "Generating test..." });
+          
+          // Generate the penetration test
+          const contractName = 'HardhatContracts'; // Generic name for combined contracts
+          const result = await generatePenetrationTest(lastAnalyzedCode, contractName);
+          
+          if (!result.success || !result.filePath) {
+            throw new Error(result.error || 'Failed to generate penetration test');
+          }
+          
+          // Detailed logging for debug
+          outputChannel.appendLine('\n======== GENERATED PENETRATION TEST DETAILS ========');
+          outputChannel.appendLine(`Test file path: ${result.filePath}`);
+          outputChannel.appendLine('\nTest File Content:');
+          try {
+            const testContent = fs.readFileSync(result.filePath, 'utf8');
+            outputChannel.appendLine(testContent);
+          } catch (err) {
+            if (err instanceof Error) {
+                outputChannel.appendLine(`Error reading test file: ${err.message}`);
+            } else {
+                outputChannel.appendLine('Error reading test file: Unknown error');
+            }
+          }
+          outputChannel.appendLine('===================================================\n');
+          
+          // Log the generated test for debugging
+          try {
+            const testCode = fs.readFileSync(result.filePath, 'utf8');
+            console.log('========= GENERATED PENETRATION TEST CODE =========');
+            console.log(testCode);
+            console.log('==================================================');
+          } catch (err) {
+            console.error('Error reading generated test file:', err);
+          }
+          
+          progress.report({ increment: 30, message: "Preparing test environment..." });
+          
+          // Ensure test dependencies
+          const depsReady = await ensureTestDependencies();
+          if (!depsReady) {
+            throw new Error("Failed to prepare test environment. See output channel for details.");
+          }
+          
+          progress.report({ increment: 40, message: "Running test..." });
+          
+          // Run the test
+          const testResult = await runPenetrationTest(result.filePath);
+          
+          // Hide loading indicator
+          if (provider && provider.webview) {
+            provider.webview.postMessage({
+              command: 'stopLoading'
+            });
+          }
+          
+          progress.report({ increment: 40, message: "Complete" });
+          
+          // Show test results in webview
+          if (provider && provider.webview) {
+            provider.webview.postMessage({
+              command: 'displayPenetrationTestResult',
+              success: testResult.success,
+              output: testResult.output,
+              filePath: result.filePath
+            });
+          }
+          
+          // Show a notification with the result
+          if (testResult.success) {
+            vscode.window.showInformationMessage(
+              `Penetration test completed successfully. See results in the sidebar.`
+            );
+          } else {
+            vscode.window.showWarningMessage(
+              `Penetration test completed with issues. See results in the sidebar.`
+            );
+          }
+        });
+      } catch (error: any) {
+        console.error('Error generating and running penetration test:', error);
+        vscode.window.showErrorMessage(`Error: ${error.message}`);
+        
+        // Reset loading state in case of error
+        if (provider && provider.webview) {
+          provider.webview.postMessage({
+            command: 'stopLoading'
+          });
+        }
+      }
+    }),
+
+    // Generate and run multiple penetration tests command
+    vscode.commands.registerCommand('testsidebarextension.generateAndRunMultipleTests', async (params) => {
+      try {
+        // Check if we have analyzed code available
+        if (!lastAnalyzedCode || lastAnalyzedCode.length === 0) {
+          // Try to load from temp file if available (existing code for fallback)
+          try {
+            if (fs.existsSync(TEMP_FILE_PATH)) {
+              lastAnalyzedCode = fs.readFileSync(TEMP_FILE_PATH, 'utf8');
+              console.log(`Loaded ${lastAnalyzedCode.length} characters from temp file`);
+            }
+          } catch (err) {
+            console.error('Error loading from temp file:', err);
+          }
+          
+          if (!lastAnalyzedCode || lastAnalyzedCode.length === 0) {
+            vscode.window.showErrorMessage('No contract code available. Please analyze contracts first.');
+            return;
+          }
+        }
+        
+        // Get vulnerabilities from parameters or latest analysis
+        const vulnerabilities = params?.vulnerabilities || [];
+        
+        if (!vulnerabilities || vulnerabilities.length === 0) {
+          vscode.window.showWarningMessage('No vulnerabilities detected to test. Please analyze the contract first.');
+          return;
+        }
+        
+        // Show progress notification
+        vscode.window.withProgress({
+          location: vscode.ProgressLocation.Notification,
+          title: `Generating ${vulnerabilities.length} Penetration Tests`,
+          cancellable: false
+        }, async (progress) => {
+          // Update UI
+          if (provider && provider.webview) {
+            provider.webview.postMessage({
+              command: 'startLoading'
+            });
+          }
+          
+          outputChannel.appendLine(`\n======== GENERATING ${vulnerabilities.length} PENETRATION TESTS ========`);
+          outputChannel.appendLine(`Found ${vulnerabilities.length} vulnerabilities to test`);
+          vulnerabilities.forEach((v: any) => {
+            outputChannel.appendLine(`- ${v.name} (${v.severity}): ${v.description.substring(0, 100)}...`);
+          });
+          outputChannel.show();
+          
+          progress.report({ increment: 10, message: `Generating ${vulnerabilities.length} tests...` });
+          
+          // Generate all tests
+          const contractName = 'HardhatContracts'; // Generic name for combined contracts
+          const result = await generateMultiplePenetrationTests(
+            lastAnalyzedCode, 
+            contractName, 
+            vulnerabilities
+          );
+          
+          if (!result.success || result.tests.length === 0) {
+            throw new Error(result.error || 'Failed to generate penetration tests');
+          }
+          
+          outputChannel.appendLine(`Generated ${result.tests.length} test files`);
+          
+          // Ensure dependencies are installed
+          progress.report({ increment: 20, message: "Preparing test environment..." });
+          const depsReady = await ensureTestDependencies();
+          if (!depsReady) {
+            throw new Error("Failed to prepare test environment. See output channel for details.");
+          }
+          
+          // Run each test
+          progress.report({ increment: 20, message: `Running ${result.tests.length} tests...` });
+          
+          const testResults = [];
+          
+          for (let i = 0; i < result.tests.length; i++) {
+            const test = result.tests[i];
+            outputChannel.appendLine(`\nRunning test ${i+1}/${result.tests.length} for ${test.vulnerability}...`);
+            progress.report({ 
+              increment: Math.floor(50 / result.tests.length), 
+              message: `Test ${i+1}/${result.tests.length}: ${test.vulnerability}` 
+            });
+            
+            // Run the test
+            const testResult = await runPenetrationTest(test.filePath);
+            test.success = testResult.success;
+            test.output = testResult.output;
+            testResults.push(test);
+          }
+          
+          // Hide loading indicator
+          if (provider && provider.webview) {
+            provider.webview.postMessage({
+              command: 'stopLoading'
+            });
+          }
+          
+          progress.report({ increment: 100, message: "Complete" });
+          
+          // Show consolidated results in webview
+          if (provider && provider.webview) {
+            provider.webview.postMessage({
+              command: 'displayMultiplePenetrationTestResults',
+              testResults
+            });
+          }
+          
+          // Show a notification with the overall result
+          const successfulTests = testResults.filter(t => t.success).length;
+          vscode.window.showInformationMessage(
+            `Penetration testing complete: ${successfulTests}/${testResults.length} vulnerabilities exploited. See results in the sidebar.`
+          );
+        });
+      } catch (error: any) {
+        console.error('Error generating and running penetration tests:', error);
+        vscode.window.showErrorMessage(`Error: ${error.message}`);
+        
+        // Reset loading state in case of error
+        if (provider && provider.webview) {
+          provider.webview.postMessage({
+            command: 'stopLoading'
+          });
+        }
+      }
+    }),
   );
   
   // Show files when extension is activated
@@ -431,6 +768,161 @@ function setIsLoading(loading: boolean) {
     provider.webview.postMessage({
       command: loading ? 'startLoading' : 'stopLoading'
     });
+  }
+}
+
+/**
+ * Runs a generated penetration test and returns the result
+ * @param testFilePath Path to the TypeScript penetration test file
+ * @returns Promise with the test result and output
+ */
+async function runPenetrationTest(testFilePath: string): Promise<{ success: boolean; output: string }> {
+  return new Promise((resolve) => {
+    outputChannel.appendLine('\n======== RUNNING PENETRATION TEST ========');
+    outputChannel.appendLine(`Test file: ${testFilePath}`);
+    outputChannel.show();
+    
+    const workspacePath = fileUtils.getWorkspacePath();
+    if (!workspacePath) {
+      outputChannel.appendLine('Error: No workspace folder is open');
+      return resolve({ success: false, output: 'No workspace folder is open' });
+    }
+    
+    try {
+      // Run the test directly with Hardhat instead of trying to compile it separately
+      outputChannel.appendLine('Running test with Hardhat...');
+      
+      const testProcess = spawn('npx', ['hardhat', 'test', testFilePath], {
+        cwd: workspacePath,
+        shell: true,
+        env: { ...process.env, TS_NODE_TRANSPILE_ONLY: 'true' } // Speed up TypeScript transpilation
+      });
+      
+      let testOutput = '';
+      
+      testProcess.stdout.on('data', (data) => {
+        const output = data.toString();
+        testOutput += output;
+        outputChannel.appendLine(output);
+      });
+      
+      testProcess.stderr.on('data', (data) => {
+        const output = data.toString();
+        testOutput += output;
+        outputChannel.appendLine(`Error: ${output}`);
+      });
+      
+      testProcess.on('close', (code) => {
+        outputChannel.appendLine(`\nPenetration test finished with code ${code}`);
+        
+        const success = code === 0;
+        outputChannel.appendLine(success ? 'Test PASSED!' : 'Test FAILED!');
+        outputChannel.appendLine('========================================');
+        
+        // Sometimes the test might fail but we still want to show the output
+        // If no output, include the test file for reference
+        if (!testOutput) {
+          try {
+            const testCode = fs.readFileSync(testFilePath, 'utf8');
+            testOutput = `No output from test execution.\n\nTest code:\n${testCode}`;
+          } catch (err) {
+            // Ignore file read errors
+          }
+        }
+        
+        resolve({
+          success,
+          output: testOutput
+        });
+      });
+    } catch (error: any) {
+      outputChannel.appendLine(`Error executing test: ${error.message}`);
+      
+      // Include the test file content in the output
+      try {
+        const testCode = fs.readFileSync(testFilePath, 'utf8');
+        resolve({
+          success: false,
+          output: `Error executing test: ${error.message}\n\n${testCode}`
+        });
+      } catch (readErr) {
+        resolve({
+          success: false,
+          output: `Error executing test: ${error.message}`
+        });
+      }
+    }
+  });
+}
+
+/**
+ * Ensures the workspace has all dependencies needed for testing
+ */
+async function ensureTestDependencies(): Promise<boolean> {
+  const workspacePath = fileUtils.getWorkspacePath();
+  if (!workspacePath) {
+    outputChannel.appendLine('Error: No workspace folder is open');
+    return false;
+  }
+  
+  try {
+    // Check if package.json exists
+    const packageJsonPath = path.join(workspacePath, 'package.json');
+    if (!fs.existsSync(packageJsonPath)) {
+      outputChannel.appendLine('Error: package.json not found in workspace');
+      return false;
+    }
+    
+    // Check if required dependencies are installed
+    const requiredDeps = ['chai', '@types/chai', '@nomicfoundation/hardhat-ethers'];
+    const missingDeps = [];
+    
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+    const allDeps = {
+      ...(packageJson.dependencies || {}),
+      ...(packageJson.devDependencies || {})
+    };
+    
+    for (const dep of requiredDeps) {
+      if (!allDeps[dep]) {
+        missingDeps.push(dep);
+      }
+    }
+    
+    if (missingDeps.length > 0) {
+      outputChannel.appendLine(`Installing missing dependencies: ${missingDeps.join(', ')}`);
+      
+      // Install missing dependencies
+      const installProcess = spawn('npm', ['install', '--save-dev', ...missingDeps], {
+        cwd: workspacePath,
+        shell: true
+      });
+      
+      return new Promise((resolve) => {
+        installProcess.stdout.on('data', (data) => {
+          outputChannel.appendLine(data.toString());
+        });
+        
+        installProcess.stderr.on('data', (data) => {
+          outputChannel.appendLine(`Error: ${data.toString()}`);
+        });
+        
+        installProcess.on('close', (code) => {
+          const success = code === 0;
+          if (success) {
+            outputChannel.appendLine('Dependencies installed successfully');
+          } else {
+            outputChannel.appendLine('Failed to install dependencies');
+          }
+          resolve(success);
+        });
+      });
+    }
+    
+    return true;
+  } catch (error: any) {
+    outputChannel.appendLine(`Error ensuring test dependencies: ${error.message}`);
+    return false;
   }
 }
 

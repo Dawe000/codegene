@@ -173,6 +173,17 @@ const App: React.FC<AppProps> = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [projectDetected, setProjectDetected] = useState<boolean>(false);
   const [projectInfo, setProjectInfo] = useState<{path: string, contractCount: number} | null>(null);
+  const [penetrationTestResult, setPenetrationTestResult] = useState<{
+    success: boolean;
+    output: string;
+    filePath: string;
+  } | null>(null);
+  const [multipleTestResults, setMultipleTestResults] = useState<{
+    vulnerability: string;
+    filePath: string;
+    success?: boolean;
+    output?: string;
+  }[] | null>(null);
 
   useEffect(() => {
     const messageHandler = (event: MessageEvent) => {
@@ -236,6 +247,20 @@ const App: React.FC<AppProps> = () => {
               isAnalysisResult: true
             }
           ]);
+          break;
+
+        case 'displayPenetrationTestResult':
+          setIsLoading(false);
+          setPenetrationTestResult({
+            success: message.success,
+            output: message.output,
+            filePath: message.filePath
+          });
+          break;
+
+        case 'displayMultiplePenetrationTestResults':
+          setIsLoading(false);
+          setMultipleTestResults(message.testResults);
           break;
       }
     };
@@ -357,12 +382,29 @@ const App: React.FC<AppProps> = () => {
             <span className="text-sm font-medium flex items-center gap-2">
               <span className="text-cyan-400">📁</span> Hardhat Project Detected
             </span>
-            <button
-              className="bg-gradient-to-r from-cyan-500 to-blue-500 text-white px-4 py-2 rounded-full text-xs font-medium transition-all duration-300 transform hover:scale-105 shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/40"
-              onClick={analyzeAllContracts}
-            >
-              Analyze All Contracts
-            </button>
+            <div className="flex gap-2">
+              <button
+                className="bg-gradient-to-r from-cyan-500 to-blue-500 text-white px-4 py-2 rounded-full text-xs font-medium transition-all duration-300 transform hover:scale-105 shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/40"
+                onClick={analyzeAllContracts}
+              >
+                Analyze All Contracts
+              </button>
+              
+              {/* Only show penetration test button after analysis */}
+              {analysis && analysis.vulnerabilities && analysis.vulnerabilities.exploits && (
+                <button
+                  className="bg-gradient-to-r from-red-500 to-amber-500 text-white px-4 py-2 rounded-full text-xs font-medium transition-all duration-300 transform hover:scale-105 shadow-lg shadow-red-500/20 hover:shadow-red-500/40"
+                  onClick={() => {
+                    vscode.postMessage({
+                      command: 'generateAndRunMultipleTests',
+                      vulnerabilities: analysis.vulnerabilities.exploits
+                    });
+                  }}
+                >
+                  Test {analysis.vulnerabilities.exploits.length} Vulnerabilities
+                </button>
+              )}
+            </div>
           </div>
           <div className="p-4">
             <div className="bg-slate-900/50 p-4 rounded-lg text-sm">
@@ -474,6 +516,106 @@ const App: React.FC<AppProps> = () => {
               {renderCategorySection('Behavior', analysis.behavior)}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Multiple Penetration Test Results */}
+      {multipleTestResults && multipleTestResults.length > 0 && (
+        <div className="mb-8">
+          <div className="mb-6 flex items-center justify-between">
+            <h4 className="text-xl font-bold text-slate-200">Vulnerability Penetration Tests</h4>
+            <div className="px-3 py-1 bg-slate-800/50 rounded-full text-xs">
+              {multipleTestResults.filter(t => t.success).length}/{multipleTestResults.length} Exploited
+            </div>
+          </div>
+          
+          <div className="space-y-4">
+            {multipleTestResults.map((result, index) => (
+              <div key={index} className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 overflow-hidden">
+                <div className={`px-6 py-4 border-b border-slate-700/50 flex items-center justify-between ${
+                  result.success 
+                    ? 'bg-gradient-to-r from-red-500/20 to-red-500/5' 
+                    : 'bg-gradient-to-r from-slate-800 to-slate-800/50'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    {result.success 
+                      ? <span className="text-red-400">⚠️</span> 
+                      : <span className="text-slate-400">🛡️</span>}
+                    <span className="font-semibold">{result.vulnerability}</span>
+                  </div>
+                  <div className={`px-2 py-1 rounded-full text-xs ${
+                    result.success 
+                      ? 'bg-red-500/30 text-red-400 border border-red-500/50' 
+                      : 'bg-emerald-500/30 text-emerald-400 border border-emerald-500/50'
+                  }`}>
+                    {result.success ? 'Exploitable' : 'Protected'}
+                  </div>
+                </div>
+                
+                <div className="p-4">
+                  <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700/50 max-h-32 overflow-y-auto">
+                    <pre className="whitespace-pre-wrap text-slate-300 text-xs font-mono">
+                      {result.output?.substring(0, 300) || 'No output available'}
+                      {result.output && result.output.length > 300 ? '...' : ''}
+                    </pre>
+                  </div>
+                  
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button
+                      className="px-4 py-2 bg-slate-700/50 text-slate-300 rounded-md text-sm font-medium"
+                      onClick={() => {
+                        vscode.postMessage({
+                          command: 'openFile',
+                          path: result.filePath
+                        });
+                      }}
+                    >
+                      View Test
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Penetration Test Results */}
+      {penetrationTestResult && (
+        <div className="mb-8">
+          <div className="mb-6 flex items-center justify-between">
+            <h4 className="text-xl font-bold text-slate-200">Penetration Test Results</h4>
+            <div className={`px-3 py-1 rounded-full text-xs ${
+              penetrationTestResult.success 
+                ? 'bg-emerald-500/30 text-emerald-400 border border-emerald-500/50' 
+                : 'bg-red-500/30 text-red-400 border border-red-500/50'
+            }`}>
+              {penetrationTestResult.success ? 'Test Passed' : 'Test Failed'}
+            </div>
+          </div>
+          
+          <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-6">
+            <h5 className="text-lg font-semibold text-white mb-4">Test Output</h5>
+            <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700/50 max-h-96 overflow-y-auto">
+              <pre className="whitespace-pre-wrap text-slate-300 text-sm font-mono">
+                {penetrationTestResult.output || 'No output available'}
+              </pre>
+            </div>
+            
+            <div className="mt-4 flex justify-end">
+              <button
+                className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-md text-sm font-medium"
+                onClick={() => {
+                  vscode.postMessage({
+                    command: 'openFile',
+                    path: penetrationTestResult.filePath
+                  });
+                }}
+              >
+                Open Test File
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
