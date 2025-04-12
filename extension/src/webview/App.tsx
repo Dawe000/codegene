@@ -85,6 +85,11 @@ const App: React.FC<AppProps> = () => {
     securityImplication?: string;
     output?: string;
     attemptNumber?: number;
+    failureAnalysis?: {
+      isSecure: boolean;
+      explanation: string;
+      suggestedFix?: string;
+    };
   }[] | null>(null);
 
   const [expandedTests, setExpandedTests] = useState<number[]>([]);
@@ -691,6 +696,49 @@ const App: React.FC<AppProps> = () => {
                           <pre className="bg-slate-900/50 text-slate-300 p-4 rounded-lg text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-64 overflow-y-auto">
                             {test.output}
                           </pre>
+                          
+                          {/* Display failure analysis if test failed and analysis is available */}
+                          {!test.exploitSuccess && test.failureAnalysis && (
+                            <div className={`mt-4 p-4 rounded-lg border ${
+                              test.failureAnalysis.isSecure 
+                                ? 'bg-green-900/20 border-green-700/30 text-green-300' 
+                                : 'bg-amber-900/20 border-amber-700/30 text-amber-300'
+                            }`}>
+                              <h6 className="font-medium text-sm mb-2">
+                                {test.failureAnalysis.isSecure 
+                                  ? '🛡️ Contract Successfully Protected Against Attack' 
+                                  : '⚠️ Test Implementation Issue Detected'}
+                              </h6>
+                              
+                              <div className="text-xs space-y-2">
+                                <div><strong>Analysis:</strong> {test.failureAnalysis.explanation}</div>
+                                {test.failureAnalysis.suggestedFix && (
+                                  <div><strong>Suggested Fix:</strong> {test.failureAnalysis.suggestedFix}</div>
+                                )}
+                              </div>
+                              
+                              {test.failureAnalysis.isSecure && (
+                                <div className="mt-3 inline-block px-2 py-1 bg-green-500/20 border border-green-500/30 rounded text-xs">
+                                  This contract appears to be secure against {test.vulnerability} attacks
+                                </div>
+                              )}
+                              
+                              {!test.failureAnalysis.isSecure && (
+                                <button
+                                  className="mt-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white px-4 py-2 rounded-full text-xs font-medium transition-all duration-300 hover:shadow-lg hover:shadow-amber-500/20"
+                                  onClick={() => {
+                                    vscode.postMessage({
+                                      command: 'adaptPenetrationTest',
+                                      testFilePath: test.filePath,
+                                      exploitSuccess: false
+                                    });
+                                  }}
+                                >
+                                  Fix Test Implementation
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

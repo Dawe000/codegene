@@ -251,163 +251,8 @@ function generateOfflineAnalysisResult(
   }
 }
 
-/**
- * Translates a contract to a different language - updated to use OpenAI SDK
- */
-export const translateContract = async (
-  sourceCode: string, 
-  targetLanguage: string
-): Promise<string> => {
-  try {
-    const requestData: ChatCompletionRequestWithVenice = {
-      model: "default",
-      messages: [
-        {
-          role: "system",
-          content: `You are an expert in blockchain development across multiple platforms. 
-          Translate the provided smart contract code into ${targetLanguage} with appropriate 
-          equivalent functionality. Include comments explaining key differences between the platforms.`
-        },
-        {
-          role: "user",
-          content: `Translate this smart contract to ${targetLanguage}:\n\n${sourceCode}`
-        }
-      ],
-      temperature: 0.1,
-      max_tokens: 2000,
-      venice_parameters: {
-        include_venice_system_prompt: false
-      }
-    };
 
-    try {
-      const response = await openai.createChatCompletion(requestData as any);
 
-      // Add null check for response data
-      if (!response?.data?.choices?.[0]?.message?.content) {
-        return 'Failed to translate contract. No response from API.';
-      }
-
-      return response.data.choices[0].message.content;
-    } catch (error: any) {
-      console.error('Error calling Venice API:', error.message);
-      
-      if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
-        return `Unable to connect to translation service. Please check your network connection and try again.\n\nError: ${error.message}`;
-      } else {
-        return `Failed to translate contract to ${targetLanguage}. API error: ${error.message}`;
-      }
-    }
-  } catch (error: any) {
-    console.error('Unexpected error in translateContract:', error);
-    return `An unexpected error occurred: ${error.message}`;
-  }
-};
-
-/**
- * Assesses insurance aspects of a contract - updated to use OpenAI SDK
- */
-export const assessInsurance = async (
-  contractCode: string, 
-  tvl: number
-): Promise<any> => {
-  try {
-    const requestData: ChatCompletionRequestWithVenice = {
-      model: "default",
-      messages: [
-        {
-          role: "system",
-          content: `You are an expert in smart contract risk assessment and insurance. 
-          Analyze the provided contract to determine its risk level and appropriate insurance premium 
-          recommendations. Consider factors like reentrancy, access control, overflow/underflow, and 
-          overall code quality. For a contract with TVL (Total Value Locked) of $${tvl}, 
-          recommend an appropriate premium percentage and coverage terms.
-          
-          Respond with a JSON object with this structure:
-          {
-            "risk_score": number from 0-100,
-            "premium_percentage": number (e.g., 2.5 for 2.5%),
-            "coverage_limit": string (e.g., "$1,000,000"),
-            "risk_factors": array of strings describing risk factors,
-            "risk_level": "Low", "Medium", or "High",
-            "policy_recommendations": array of strings with policy details,
-            "exclusions": array of strings listing what wouldn't be covered
-          }`
-        },
-        {
-          role: "user",
-          content: `Assess the insurance risk and premium for this smart contract with TVL of $${tvl}:\n\n${contractCode}`
-        }
-      ],
-      temperature: 0.1,
-      max_tokens: 2000,
-      venice_parameters: {
-        include_venice_system_prompt: false
-      }
-    };
-
-    try {
-      const response = await openai.createChatCompletion(requestData as any);
-
-      // Add null check for response data
-      if (!response?.data?.choices?.[0]?.message?.content) {
-        throw new Error('Empty or invalid response from API');
-      }
-
-      const content = response.data.choices[0].message.content || "";
-      
-      // Try to parse the response as JSON
-      try {
-        // Extract JSON object if it's embedded in markdown or text
-        const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || 
-                          content.match(/```\n([\s\S]*?)\n```/) || 
-                          content.match(/{[\s\S]*?}/);
-                          
-        if (!jsonMatch) {
-          throw new Error('Could not find valid JSON in response');
-        }
-        
-        const jsonStr = jsonMatch[0].replace(/```json\n|```\n|```/g, '');
-        return JSON.parse(jsonStr);
-      } catch (e) {
-        console.error("Failed to parse JSON from API response:", e);
-        // Return the raw content as a fallback
-        return {
-          risk_score: 50,
-          premium_percentage: 5,
-          coverage_limit: `$${Math.floor(tvl * 0.8).toLocaleString()}`,
-          risk_factors: [typeof content === 'string' ? content : "No analysis available"],
-          risk_level: "Medium",
-          policy_recommendations: ["Standard coverage recommended"],
-          exclusions: ["Intentional vulnerabilities", "Social engineering attacks"]
-        };
-      }
-    } catch (error: any) {
-      console.error('Error calling Venice API:', error.message);
-      
-      // Generate offline insurance assessment
-      return {
-        risk_score: 50,
-        premium_percentage: 5,
-        coverage_limit: `$${Math.floor(tvl * 0.8).toLocaleString()}`,
-        risk_factors: [`Could not connect to analysis service: ${error.message}`, "Using default risk assessment"],
-        risk_level: "Medium",
-        policy_recommendations: ["Standard coverage recommended", "Manual code review recommended"],
-        exclusions: ["Intentional vulnerabilities", "Social engineering attacks"],
-        error_info: `API connection error: ${error.message}`,
-        offline_mode: true
-      };
-    }
-  } catch (error: any) {
-    console.error('Unexpected error in assessInsurance:', error);
-    return {
-      error: `Failed to assess insurance risk: ${error.message}`,
-      offline_mode: true,
-      risk_level: "Medium",
-      premium_percentage: 5
-    };
-  }
-};
 
 /**
  * Generates a TypeScript penetration test for a smart contract
@@ -434,6 +279,7 @@ export const generatePenetrationTest = async (
     console.log(`Contract code length: ${contractCode.length} characters`);
     console.log(`First 200 chars: ${contractCode.substring(0, 200).replace(/\n/g, '\\n')}...`);
     
+    // Update your system prompt to embed helper functions directly in the test files
     const systemPrompt = `You are an expert in smart contract security and penetration testing. 
 Create a standalone TypeScript file that performs penetration testing on the provided smart contract.
 
@@ -686,21 +532,15 @@ export const generateMultiplePenetrationTests = async (
   try {
     console.log(`⭐ Generating ${vulnerabilities.length} penetration tests for ${contractName}`);
     
-    // Array to store test results
-    const tests: {vulnerability: string, filePath: string, success?: boolean, exploitSuccess?: boolean, output?: string, securityImplication?: string}[] = [];
-    
-    // Generate a test for each vulnerability
-    for (const vulnerability of vulnerabilities) {
+    // Create an array of promises for parallel execution
+    const testPromises = vulnerabilities.map(async (vulnerability, index) => {
+      // Optional delay to stagger requests slightly and avoid overwhelming the API
+      // Adjust or remove if not needed
+      await new Promise(resolve => setTimeout(resolve, index * 200));
+      
       console.log(`Generating test for vulnerability: ${vulnerability.name}`);
       
       try {
-        // Prepare a more specific prompt for this vulnerability
-        const specificPrompt = `Based on the following vulnerability: "${vulnerability.name}" - ${vulnerability.description}
-        
-        Create a penetration test that specifically exploits this vulnerability. Focus on a 
-        targeted test that clearly demonstrates how the vulnerability can be exploited.`;
-        
-        // Generate the test
         const result = await generatePenetrationTest(
           contractCode, 
           contractName, 
@@ -708,20 +548,28 @@ export const generateMultiplePenetrationTests = async (
         );
         
         if (result.success && result.filePath) {
-          tests.push({
+          return {
             vulnerability: vulnerability.name,
             filePath: result.filePath
-          });
+          };
         } else {
           console.error(`Failed to generate test for ${vulnerability.name}: ${result.error}`);
+          return null;
         }
       } catch (error: any) {
         console.error(`Error generating test for ${vulnerability.name}:`, error);
+        return null;
       }
-      
-      // Add a small delay between API calls to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
+    });
+    
+    // Wait for all tests to complete
+    const results = await Promise.all(testPromises);
+    
+    // Filter out any null results (failed tests)
+    const tests = results.filter(result => result !== null) as {
+      vulnerability: string;
+      filePath: string;
+    }[];
     
     if (tests.length === 0) {
       return {
@@ -782,6 +630,7 @@ export const adaptPenetrationTest = async (
         throw new Error('Could not read test file: Unknown error');
       }
     }
+
     
     // Extract vulnerability type from filename
     const fileNameMatch = path.basename(testFilePath).match(/penetrationTest-[^-]+-(.+)\.ts$/);
@@ -953,7 +802,7 @@ export const validateAndCorrectTest = async (
     const contractNameMatch = contractCode.match(/contract\s+(\w+)\s*{/);
     const contractName = contractNameMatch ? contractNameMatch[1] : 'Contract';
     console.log(`Detected contract name: ${contractName}`);
-    
+
     const systemPrompt = `You are an expert in smart contract security testing with Hardhat. 
 You're given a penetration test that may contain issues like external contract dependencies or syntax errors.
 Your task is to correct the test and make it fully self-contained.
@@ -1013,7 +862,10 @@ SMART CONTRACT BEING TESTED:
 ${contractCode}
 \`\`\`
 
-The test is encountering Hardhat artifacts errors. Please fix the test to correctly use the contract name "${contractName}" from my Hardhat project.
+The test is encountering Hardhat artifacts errors. Please fix the test to correctly use the contract name "${contractName}" from my Hardhat project. 
+
+Also, make sure the test is COMPLETELY SELF-CONTAINED and doesn't rely on any external modules like "transactionHelper". 
+
 Return ONLY the corrected test code as plain text without any markdown or explanations.`
         }
       ],
@@ -1037,8 +889,8 @@ Return ONLY the corrected test code as plain text without any markdown or explan
     
     // Remove any markdown code blocks if present
     const codeMatch = correctedCode.match(/```typescript\n([\s\S]*?)\n```/) || 
-                    correctedCode.match(/```ts\n([\s\S]*?)\n```/) || 
-                    correctedCode.match(/```\n([\s\S]*?)\n```/);
+                     correctedCode.match(/```ts\n([\s\S]*?)\n```/) || 
+                     correctedCode.match(/```\n([\s\S]*?)\n```/);
                     
     if (codeMatch && codeMatch[1]) {
       correctedCode = codeMatch[1];
@@ -1472,3 +1324,214 @@ Based on the above contract and test results, generate a detailed security repor
   }
 };
 
+/**
+ * Analyzes a failed penetration test to determine if it failed due to security protections
+ * or due to technical issues with the test itself
+ * 
+ * @param testOutput The output from the test execution
+ * @param contractCode The smart contract code being tested
+ * @param vulnerabilityType The type of vulnerability being tested
+ * @returns Analysis result with failure type and explanation
+ */
+export const analyzeTestFailure = async (
+  testOutput: string,
+  contractCode: string,
+  vulnerabilityType: string
+): Promise<{
+  isSecure: boolean;  // true if contract is secure, false if test had technical issues
+  failureType: string;
+  explanation: string;
+  suggestedFix?: string;
+}> => {
+  try {
+    console.log(`🔍 Analyzing test failure for ${vulnerabilityType} vulnerability`);
+    
+    // Common patterns indicating technical test failures
+    const deploymentErrorPatterns = [
+      { regex: /Artifact for contract .* not found/i, type: "deployment_error", secure: false },
+      { regex: /cannot resolve dependency graph/i, type: "dependency_error", secure: false },
+      { regex: /Invalid contract address/i, type: "address_error", secure: false },
+      { regex: /Constructor arguments don't match/i, type: "constructor_error", secure: false }
+    ];
+    
+    // Patterns indicating security mechanisms working (contract is secure)
+    const securityProtectionPatterns = [
+      { 
+        regex: /VM Exception while processing transaction: reverted with panic code 0x11/i, 
+        type: "arithmetic_protection", 
+        secure: true,
+        explanation: "The contract is protected against arithmetic overflow/underflow in Solidity 0.8.0+",
+        suggestedFix: "To test for overflow vulnerability, use 'unchecked' blocks or compile with Solidity <0.8.0"
+      },
+      { 
+        regex: /revert(?:ed)? with reason string ['"](?:Access denied|Ownable: caller is not the owner|Not owner|Only admin|Unauthorized)/i, 
+        type: "access_control", 
+        secure: true,
+        explanation: "The contract has working access control protections that prevented the exploit",
+        suggestedFix: "If this is unexpected, verify if the test is using the correct account for the operation"
+      },
+      { 
+        regex: /revert(?:ed)? with reason string ['"](?:ReentrancyGuard: reentrant call|Invalid reentrancy state)/i, 
+        type: "reentrancy_guard", 
+        secure: true,
+        explanation: "The contract has reentrancy protections that successfully prevented the attack",
+        suggestedFix: "If testing reentrancy, verify the attack vector - this contract appears to be protected"
+      }
+    ];
+    
+    // Patterns for known syntax or runtime errors in the test itself
+    const testErrorPatterns = [
+      { regex: /TypeError|SyntaxError/i, type: "test_code_error", secure: false },
+      { regex: /Cannot read property .* of undefined/i, type: "test_runtime_error", secure: false },
+      { regex: /Invalid BigNumber/i, type: "test_number_error", secure: false },
+      { regex: /cannot estimate gas/i, type: "test_gas_error", secure: false }
+    ];
+    
+    // Test patterns against the output
+    for (const pattern of deploymentErrorPatterns) {
+      if (pattern.regex.test(testOutput)) {
+        return {
+          isSecure: false,
+          failureType: pattern.type,
+          explanation: "The test failed due to deployment or configuration issues, not because of contract security",
+          suggestedFix: "Check contract name, constructor parameters, and deployment process in the test"
+        };
+      }
+    }
+    
+    for (const pattern of securityProtectionPatterns) {
+      if (pattern.regex.test(testOutput)) {
+        return {
+          isSecure: true,
+          failureType: pattern.type,
+          explanation: pattern.explanation || "The contract's security measures successfully prevented the exploit",
+          suggestedFix: pattern.suggestedFix
+        };
+      }
+    }
+    
+    for (const pattern of testErrorPatterns) {
+      if (pattern.regex.test(testOutput)) {
+        return {
+          isSecure: false,
+          failureType: pattern.type,
+          explanation: "The test failed due to code errors in the test itself, not because of contract security",
+          suggestedFix: "Fix syntax or runtime errors in the test code"
+        };
+      }
+    }
+    
+    // For more complex cases, use Venice API to analyze
+    if (process.env.REACT_APP_VENICE_API_KEY) {
+      const analysisResult = await analyzeFailureWithAI(testOutput, contractCode, vulnerabilityType);
+      if (analysisResult) {
+        return analysisResult;
+      }
+    }
+    
+    // Default case if no pattern matched
+    return {
+      isSecure: false,
+      failureType: "unknown_error",
+      explanation: "The test failed but we couldn't determine if it's due to contract security or technical issues",
+      suggestedFix: "Review the test output manually for more details"
+    };
+  } catch (error: any) {
+    console.error("❌ Error analyzing test failure:", error);
+    return {
+      isSecure: false,
+      failureType: "analysis_error",
+      explanation: `Error while analyzing test failure: ${error.message}`,
+      suggestedFix: "Try running the test again or review the output manually"
+    };
+  }
+};
+
+/**
+ * Uses Venice API to analyze a test failure case that couldn't be matched with simple patterns
+ * @param testOutput The test output
+ * @param contractCode The contract code
+ * @param vulnerabilityType The vulnerability being tested
+ * @returns Analysis result
+ */
+async function analyzeFailureWithAI(
+  testOutput: string,
+  contractCode: string,
+  vulnerabilityType: string
+): Promise<{
+  isSecure: boolean;
+  failureType: string;
+  explanation: string;
+  suggestedFix?: string;
+} | null> {
+  try {
+    const systemPrompt = `You are an expert smart contract security analyst.
+Your task is to analyze a failed penetration test and determine if the failure was because:
+1. The contract is secure and its security measures prevented the exploit (isSecure = true)
+2. The test itself had technical issues like deployment problems or coding errors (isSecure = false)
+
+Focus only on this distinction. Do not perform a full security audit.`;
+
+    const requestData: ChatCompletionRequestWithVenice = {
+      model: "default",
+      messages: [
+        {
+          role: "system",
+          content: systemPrompt
+        },
+        {
+          role: "user",
+          content: `A penetration test for a ${vulnerabilityType} vulnerability failed with this output:
+\`\`\`
+${testOutput}
+\`\`\`
+
+Contract being tested:
+\`\`\`solidity
+${contractCode}
+\`\`\`
+
+Did the test fail because the contract is secure (security measures working correctly) or because of technical issues with the test itself?
+
+Respond in JSON format:
+{
+  "isSecure": boolean,
+  "failureType": "string",
+  "explanation": "Detailed explanation of the failure",
+  "suggestedFix": "Suggestion to address the issue"
+}
+`
+        }
+      ],
+      temperature: 0.1,
+      max_tokens: 1000,
+      venice_parameters: {
+        include_venice_system_prompt: false
+      }
+    };
+
+    const response = await openai.createChatCompletion(requestData as any);
+    
+    if (!response?.data?.choices?.[0]?.message?.content) {
+      return null;
+    }
+
+    const content = response.data.choices[0].message.content;
+    
+    // Extract JSON response
+    try {
+      // Look for JSON pattern in the response
+      const jsonMatch = content.match(/{[\s\S]*}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+    } catch (e) {
+      console.error("Failed to parse AI analysis response:", e);
+    }
+    
+    return null;
+  } catch (error) {
+    console.error("Error using AI to analyze test failure:", error);
+    return null;
+  }
+}

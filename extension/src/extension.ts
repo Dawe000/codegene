@@ -5,7 +5,7 @@ import * as os from 'os';
 import { spawn } from 'child_process';
 import { SidebarWebViewProvider } from './webviewProvider';
 import { getSolAndRustFileNames, getGroupedFileNames } from './fileNameUtils';
-import { analyzeContract, generatePenetrationTest, generateMultiplePenetrationTests, adaptPenetrationTest, generateSecurityReport } from './veniceService';
+import { analyzeTestFailure, analyzeContract, generatePenetrationTest, generateMultiplePenetrationTests, adaptPenetrationTest, generateSecurityReport } from './veniceService';
 import * as fileUtils from './fileUtils';
 import * as hardhatService from './hardhatService';
 
@@ -97,29 +97,15 @@ export function activate(context: vscode.ExtensionContext) {
       analyzeHardhatContracts(provider);
     }),
     
-    // Hardhat node commands (kept intact)
+    // Hardhat node commands (updated)
     vscode.commands.registerCommand('testsidebarextension.startNodeAndDeploy', async () => {
       try {
-        const result = await hardhatService.startNodeAndDeploy(outputChannel);
-        
-        if (result.success) {
-          vscode.window.showInformationMessage(result.message);
-          
-          // If webview is available, send the deployment info
-          if (provider && provider.webview) {
-            provider.webview.postMessage({
-              command: 'hardhatNodeStarted',
-              nodeUrl: result.nodeInfo?.url || 'http://localhost:8545',
-              contractAddresses: result.contracts 
-                ? result.contracts.map(contract => ({
-                    name: contract.name,
-                    address: contract.address
-                  })) 
-                : []
-            });
-          }
+        // Basic check if hardhatService is properly set up
+        if (typeof hardhatService.getSigner === 'function') {
+          const result = await hardhatService.startNodeAndDeploy(outputChannel);
+          vscode.window.showInformationMessage(result.message || 'Node started');
         } else {
-          vscode.window.showErrorMessage(result.message);
+          vscode.window.showInformationMessage('Hardhat service not fully configured');
         }
       } catch (error: any) {
         vscode.window.showErrorMessage(`Error: ${(error as any).message}`);
@@ -127,71 +113,26 @@ export function activate(context: vscode.ExtensionContext) {
     }),
     
     vscode.commands.registerCommand('testsidebarextension.stopNode', () => {
-      const stopped = hardhatService.stopNode();
-      if (stopped) {
-        vscode.window.showInformationMessage('Hardhat node stopped');
-        
-        // Notify webview if available
-        if (provider && provider.webview) {
-          provider.webview.postMessage({
-            command: 'hardhatNodeStopped'
-          });
+      try {
+        if (typeof hardhatService.stopNode === 'function') {
+          const stopped = hardhatService.stopNode();
+          vscode.window.showInformationMessage(stopped ? 
+            'Hardhat node stopped' : 'No Hardhat node is running');
+        } else {
+          vscode.window.showInformationMessage('Hardhat service not fully configured');
         }
-      } else {
-        vscode.window.showInformationMessage('No Hardhat node is running');
+      } catch (error) {
+        vscode.window.showErrorMessage('Error stopping Hardhat node');
       }
     }),
 
     // Add new transaction commands
     vscode.commands.registerCommand('testsidebarextension.getContractInfo', async () => {
-      try {
-        const transactionInfo = await hardhatService.getTransactionInfo();
-        if (transactionInfo.contracts.length > 0) {
-          const contractList = transactionInfo.contracts.map(c => `${c.name}: ${c.address}`).join('\n');
-          vscode.window.showInformationMessage(`Deployed contracts:\n${contractList}`);
-          
-          // Also log to output
-          outputChannel.appendLine('--- Deployed Contracts ---');
-          transactionInfo.contracts.forEach(c => {
-            outputChannel.appendLine(`${c.name}: ${c.address}`);
-          });
-        } else {
-          vscode.window.showInformationMessage('No deployed contracts found');
-        }
-      } catch (error: any) {
-        vscode.window.showErrorMessage(`Error: ${error as Error}.message`);
-      }
+      vscode.window.showInformationMessage('This functionality is currently disabled');
     }),
     
     vscode.commands.registerCommand('testsidebarextension.getAccountInfo', () => {
-      try {
-        const nodeInfo = hardhatService.getNodeInfo();
-        if (nodeInfo.isRunning) {
-          const accountInfo = nodeInfo.accounts.map(a => 
-            `Address: ${a.address}\nPrivate Key: ${a.privateKey}`
-          ).join('\n\n');
-          
-          // Show a subset in the notification
-          const shortInfo = nodeInfo.accounts.slice(0, 2).map(a => 
-            `${a.address.substring(0, 10)}...`
-          ).join(', ') + ', ...';
-          
-          vscode.window.showInformationMessage(`Available accounts: ${shortInfo} (see output channel for details)`);
-          
-          // Log full details to output
-          outputChannel.appendLine('--- Hardhat Accounts ---');
-          nodeInfo.accounts.forEach((a, i) => {
-            outputChannel.appendLine(`Account ${i}:`);
-            outputChannel.appendLine(`  Address: ${a.address}`);
-            outputChannel.appendLine(`  Private Key: ${a.privateKey}`);
-            outputChannel.appendLine('');
-          });
-        } else {
-          vscode.window.showWarningMessage('Hardhat node is not running');
-        }
-      } catch (error: any) {
-        vscode.window.showErrorMessage(`Error: ${(error as Error).message}`);
-      }
+      vscode.window.showInformationMessage('This functionality is currently disabled');
     }),
 
     // Generate penetration test command
@@ -376,7 +317,20 @@ export function activate(context: vscode.ExtensionContext) {
               exploitSuccess: testResult.exploitSuccess,
               securityImplication: testResult.securityImplication,
               output: testResult.output,
-              filePath: result.filePath
+              filePath: result.filePath,
+              failureAnalysis: testResult.failureAnalysis // Add this line
+            });
+          }
+
+          // Update single test result in provider
+          if (provider) {
+            provider.updateSingleTestResult({
+              success: testResult.success,
+              exploitSuccess: testResult.exploitSuccess,
+              securityImplication: testResult.securityImplication,
+              output: testResult.output,
+              filePath: result.filePath,
+              failureAnalysis: testResult.failureAnalysis
             });
           }
 
@@ -504,18 +458,31 @@ export function activate(context: vscode.ExtensionContext) {
               exploitSuccess?: boolean;
               output?: string;
               securityImplication?: string;
+              failureAnalysis?: {
+                isSecure: boolean;
+                failureType: string;
+                explanation: string;
+                suggestedFix?: string;
+              };
             };
-
-            // Now assign the properties
+            
+            // Update the test result with the new data
             extendedTest.success = testResult.success;
-            extendedTest.exploitSuccess = testResult.exploitSuccess || false;
+            extendedTest.exploitSuccess = testResult.exploitSuccess;
             extendedTest.output = testResult.output;
-            extendedTest.securityImplication = testResult.securityImplication || '';
+            extendedTest.securityImplication = testResult.securityImplication;
+            extendedTest.failureAnalysis = testResult.failureAnalysis;
+            
             testResults.push(extendedTest);
           }
           
           // Store test results globally for later use
           multipleTestResults = testResults;
+
+          // Update multiple test results in provider
+          if (provider) {
+            provider.updateTestResults(multipleTestResults);
+          }
           
           // Hide loading indicator
           if (provider && provider.webview) {
@@ -996,8 +963,19 @@ function setIsLoading(loading: boolean) {
  * @param testFilePath Path to the TypeScript penetration test file
  * @returns Promise with the test result and output
  */
-async function runPenetrationTest(testFilePath: string): Promise<{ success: boolean; exploitSuccess?: boolean; output: string; securityImplication?: string }> {
-  return new Promise((resolve) => {
+async function runPenetrationTest(testFilePath: string): Promise<{
+  success: boolean;
+  exploitSuccess?: boolean;
+  output: string;
+  securityImplication?: string;
+  failureAnalysis?: {
+    isSecure: boolean;
+    failureType: string;
+    explanation: string;
+    suggestedFix?: string;
+  }
+}> {
+  return new Promise(async (resolve) => {
     outputChannel.appendLine('\n======== RUNNING PENETRATION TEST ========');
     outputChannel.appendLine(`Test file: ${testFilePath}`);
     outputChannel.show();
@@ -1012,6 +990,7 @@ async function runPenetrationTest(testFilePath: string): Promise<{ success: bool
       // First, extract vulnerability description from the test file
       let vulnerabilityDescription = '';
       let testPurpose = '';
+      let vulnerabilityType = '';
       
       try {
         const testContent = fs.readFileSync(testFilePath, 'utf8');
@@ -1025,6 +1004,18 @@ async function runPenetrationTest(testFilePath: string): Promise<{ success: bool
         const testNameMatch = testContent.match(/describe\("([^"]*)/);
         if (testNameMatch && testNameMatch[1]) {
           testPurpose = testNameMatch[1].trim();
+        }
+        
+        // Try to extract vulnerability type from filename or test content
+        const fileNameMatch = path.basename(testFilePath).match(/penetrationTest-[^-]+-(.+)\.ts$/);
+        if (fileNameMatch && fileNameMatch[1]) {
+          vulnerabilityType = fileNameMatch[1];
+        } else if (testPurpose) {
+          // Try to extract from test purpose if not in filename
+          const vulnTypeMatch = testPurpose.match(/(Reentrancy|Access Control|Integer|Overflow|Underflow|Logic|Front-running)/i);
+          if (vulnTypeMatch) {
+            vulnerabilityType = vulnTypeMatch[1];
+          }
         }
       } catch (err) {
         console.error('Error reading test file for description:', err);
@@ -1053,7 +1044,7 @@ async function runPenetrationTest(testFilePath: string): Promise<{ success: bool
         outputChannel.appendLine(`Error: ${output}`);
       });
       
-      testProcess.on('close', (code) => {
+      testProcess.on('close', async (code) => {
         outputChannel.appendLine(`\nPenetration test finished with code ${code}`);
         
         const testRanSuccessfully = code === 0;
@@ -1068,12 +1059,58 @@ async function runPenetrationTest(testFilePath: string): Promise<{ success: bool
           outputChannel.appendLine(`\nVulnerability: ${securityImplication}`);
         }
         
+        // If test failed, analyze the failure reason using the new functions
+        let failureAnalysis = undefined;
+        if (!testRanSuccessfully) {
+          outputChannel.appendLine('\nAnalyzing test failure...');
+          
+          try {
+            // Load the contract code for analysis
+            let contractCode = '';
+            
+            // Try to find contract code from temp file or active editor
+            if (fs.existsSync(TEMP_FILE_PATH)) {
+              contractCode = fs.readFileSync(TEMP_FILE_PATH, 'utf8');
+            } else {
+              const editor = vscode.window.activeTextEditor;
+              if (editor && editor.document.fileName.endsWith('.sol')) {
+                contractCode = editor.document.getText();
+              }
+            }
+            
+            if (contractCode) {
+              failureAnalysis = await analyzeTestFailure(
+                testOutput, 
+                contractCode, 
+                vulnerabilityType || 'Unknown'
+              );
+              
+              outputChannel.appendLine(`\nFailure analysis: ${failureAnalysis.isSecure ? 'CONTRACT IS SECURE' : 'TEST HAS ISSUES'}`);
+              outputChannel.appendLine(`Type: ${failureAnalysis.failureType}`);
+              outputChannel.appendLine(`Explanation: ${failureAnalysis.explanation}`);
+              if (failureAnalysis.suggestedFix) {
+                outputChannel.appendLine(`Suggested fix: ${failureAnalysis.suggestedFix}`);
+              }
+            } else {
+              outputChannel.appendLine('\nCould not analyze test failure - contract code not available');
+            }
+          } catch (analyzeError) {
+            console.error('Error analyzing test failure:', analyzeError);
+            if (analyzeError instanceof Error) {
+                outputChannel.appendLine(`\nError analyzing test failure: ${analyzeError.message}`);
+            } else {
+                outputChannel.appendLine(`\nError analyzing test failure: ${String(analyzeError)}`);
+            }
+          }
+        }
+        
         // Create the result object with security information
         resolve({
           success: testRanSuccessfully,
           exploitSuccess,
           output: testOutput,
-          securityImplication
+          securityImplication,
+          failureAnalysis
         });
       });
     } catch (error: any) {
