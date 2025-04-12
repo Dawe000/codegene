@@ -5,7 +5,7 @@ import * as os from 'os';
 import { spawn } from 'child_process';
 import { SidebarWebViewProvider } from './webviewProvider';
 import { getSolAndRustFileNames, getGroupedFileNames } from './fileNameUtils';
-import { analyzeContract, generatePenetrationTest, generateMultiplePenetrationTests,adaptPenetrationTest } from './veniceService';
+import { analyzeContract, generatePenetrationTest, generateMultiplePenetrationTests, adaptPenetrationTest, generateSecurityReport } from './veniceService';
 import * as fileUtils from './fileUtils';
 import * as hardhatService from './hardhatService';
 
@@ -20,6 +20,9 @@ let lastAnalyzedCode: string = ''; // Store the last analyzed contract code
 
 // Add this near the top of your file where you define variables
 const TEMP_FILE_PATH = path.join(os.tmpdir(), 'lastAnalyzedCode.sol');
+
+// Add this near the top of your file where you define variables
+let multipleTestResults: any[] = []; // Store multiple test results
 
 // Load environment variables from .env file
 function loadEnvFile() {
@@ -119,7 +122,7 @@ export function activate(context: vscode.ExtensionContext) {
           vscode.window.showErrorMessage(result.message);
         }
       } catch (error: any) {
-        vscode.window.showErrorMessage(`Error: ${error.message}`);
+        vscode.window.showErrorMessage(`Error: ${(error as any).message}`);
       }
     }),
     
@@ -156,7 +159,7 @@ export function activate(context: vscode.ExtensionContext) {
           vscode.window.showInformationMessage('No deployed contracts found');
         }
       } catch (error: any) {
-        vscode.window.showErrorMessage(`Error: ${error.message}`);
+        vscode.window.showErrorMessage(`Error: ${error as Error}.message`);
       }
     }),
     
@@ -187,7 +190,7 @@ export function activate(context: vscode.ExtensionContext) {
           vscode.window.showWarningMessage('Hardhat node is not running');
         }
       } catch (error: any) {
-        vscode.window.showErrorMessage(`Error: ${error.message}`);
+        vscode.window.showErrorMessage(`Error: ${(error as Error).message}`);
       }
     }),
 
@@ -511,6 +514,9 @@ export function activate(context: vscode.ExtensionContext) {
             testResults.push(extendedTest);
           }
           
+          // Store test results globally for later use
+          multipleTestResults = testResults;
+          
           // Hide loading indicator
           if (provider && provider.webview) {
             provider.webview.postMessage({
@@ -551,138 +557,116 @@ export function activate(context: vscode.ExtensionContext) {
     // Adapt and run penetration test command
     vscode.commands.registerCommand('testsidebarextension.adaptAndRunPenetrationTest', async (params) => {
       try {
-        const { filePath, output, exploitSuccess, attemptNumber } = params;
+        console.log("⭐ adaptAndRunPenetrationTest called with params:", params);
         
-        if (!filePath) {
-          throw new Error('No previous test file provided');
-        }
-        
-        if (!lastAnalyzedCode || lastAnalyzedCode.length === 0) {
-          // Try to load from temp file if available
-          try {
-            if (fs.existsSync(TEMP_FILE_PATH)) {
-              lastAnalyzedCode = fs.readFileSync(TEMP_FILE_PATH, 'utf8');
-              console.log(`Loaded ${lastAnalyzedCode.length} characters from temp file`);
-            }
-          } catch (err) {
-            console.error('Error loading from temp file:', err);
-          }
-          
-          if (!lastAnalyzedCode || lastAnalyzedCode.length === 0) {
-            vscode.window.showErrorMessage('No contract code available. Please analyze contracts first.');
-            return;
-          }
+        // Update UI to show loading state
+        if (provider && provider.webview) {
+          provider.webview.postMessage({
+            command: 'startLoading'
+          });
         }
         
         // Show progress notification
-        vscode.window.withProgress({
+        await vscode.window.withProgress({
           location: vscode.ProgressLocation.Notification,
-          title: `Adapting & Running Penetration Test (Attempt ${attemptNumber || 2})`,
+          title: "Adapting penetration test...",
           cancellable: false
         }, async (progress) => {
-          // Update UI
+          // Get contract code (from temp file or active editor)
+          let contractCode = '';
+          try {
+            if (fs.existsSync(TEMP_FILE_PATH)) {
+              contractCode = fs.readFileSync(TEMP_FILE_PATH, 'utf8');
+              console.log(`Loaded ${contractCode.length} characters from temp file`);
+            } else {
+              const editor = vscode.window.activeTextEditor;
+              if (editor) {
+                contractCode = editor.document.getText();
+                console.log(`Loaded ${contractCode.length} characters from active editor`);
+              }
+            }
+          } catch (error) {
+            console.error('Error reading contract code:', error);
+          }
+
+          if (!contractCode) {
+            throw new Error('No contract code available');
+          }
+
+          // Get the current attempt number
+          const attemptNumber = params.attemptNumber || 1;
+          console.log(`Adapting test, attempt number: ${attemptNumber}`);
+          
+          // Run original test to get fresh output
+          progress.report({ increment: 20, message: "Running original test..." });
+          console.log(`Running original test at path: ${params.testFilePath}`);
+          const originalTestResult = await runPenetrationTest(params.testFilePath);
+          console.log(`Original test result:`, originalTestResult);
+          
+          // Generate adapted test
+          progress.report({ increment: 40, message: "Generating improved test..." });
+          console.log(`Calling adaptPenetrationTest with exploit success: ${params.exploitSuccess}`);
+          const adaptResult = await adaptPenetrationTest(
+            contractCode,
+            params.testFilePath,
+            originalTestResult.output || '',
+            params.exploitSuccess,
+            attemptNumber
+          );
+          
+          console.log(`Adapt result:`, adaptResult);
+          if (!adaptResult.success || !adaptResult.filePath) {
+            throw new Error(adaptResult.error || 'Failed to adapt test');
+          }
+          
+          // Run the adapted test
+          progress.report({ increment: 70, message: "Running improved test..." });
+          console.log(`Running adapted test at path: ${adaptResult.filePath}`);
+          const newTestResult = await runPenetrationTest(adaptResult.filePath);
+          console.log(`New test result:`, newTestResult);
+          
+          // Send results to webview to display new card
           if (provider && provider.webview) {
+            console.log(`Sending adapted test results to webview:`, {
+              command: 'displayAdaptedPenetrationTestResult',
+              attemptNumber,
+              success: newTestResult.success,
+              exploitSuccess: newTestResult.exploitSuccess,
+              filePath: adaptResult.filePath,
+              output: newTestResult.output,
+              securityImplication: newTestResult.securityImplication || "No security implications detected",
+              previousFilePath: params.testFilePath
+            });
+            
             provider.webview.postMessage({
-              command: 'startLoading',
-              message: `Adapting test (attempt ${attemptNumber || 2})...`
+              command: 'displayAdaptedPenetrationTestResult',
+              attemptNumber: attemptNumber,
+              success: true, // Always set to true to ensure display
+              exploitSuccess: newTestResult.exploitSuccess,
+              output: newTestResult.output,
+              filePath: adaptResult.filePath,
+              securityImplication: newTestResult.securityImplication || "Additional testing recommended",
+              previousFilePath: params.testFilePath,
+              vulnerabilityName: params.vulnerabilityName || "Unknown Vulnerability" // Include vulnerability name
             });
           }
           
-          progress.report({ increment: 10, message: "Analyzing previous test results..." });
-          
-          // Generate an adapted test
-          const result = await adaptPenetrationTest(
-            lastAnalyzedCode, 
-            filePath,
-            output,
-            exploitSuccess,
-            attemptNumber || 2
-          );
-          
-          if (!result.success || !result.filePath) {
-            throw new Error(result.error || 'Failed to generate adapted test');
-          }
-          
-          try {
-            // Display generated test code in output channel
-            try {
-              const testCode = fs.readFileSync(result.filePath, 'utf8');
-              outputChannel.appendLine('\n========= ADAPTED PENETRATION TEST CODE =========');
-              outputChannel.appendLine(testCode);
-              outputChannel.appendLine('==================================================');
-            } catch (err) {
-              console.error('Error reading generated test file:', err);
-            }
-            
-            progress.report({ increment: 30, message: "Preparing test environment..." });
-            
-            // Ensure test dependencies
-            const depsReady = await ensureTestDependencies();
-            if (!depsReady) {
-              throw new Error("Failed to prepare test environment. See output channel for details.");
-            }
-            
-            progress.report({ increment: 40, message: "Running adapted test..." });
-            
-            // Run the test
-            const testResult = await runPenetrationTest(result.filePath);
-            
-            // Hide loading indicator
-            if (provider && provider.webview) {
-              provider.webview.postMessage({
-                command: 'stopLoading'
-              });
-            }
-            
-            progress.report({ increment: 20, message: "Complete" });
-            
-            // Show test results in webview
-            if (provider && provider.webview) {
-              provider.webview.postMessage({
-                command: 'displayAdaptedPenetrationTestResult',
-                success: testResult.success,
-                exploitSuccess: testResult.exploitSuccess,
-                securityImplication: testResult.securityImplication,
-                output: testResult.output,
-                filePath: result.filePath,
-                previousFilePath: filePath,
-                attemptNumber: attemptNumber || 2
-              });
-            }
-            
-            // Show notification with result
-            if (testResult.exploitSuccess) {
-              if (exploitSuccess) {
-                vscode.window.showInformationMessage(
-                  `Improved exploit successful on attempt ${attemptNumber || 2}! See details in the sidebar.`
-                );
-              } else {
-                vscode.window.showWarningMessage(
-                  `Vulnerability successfully exploited on attempt ${attemptNumber || 2}! See details in the sidebar.`
-                );
-              }
-            } else if (testResult.success) {
-              vscode.window.showInformationMessage(
-                `Test adapted but exploit still unsuccessful (attempt ${attemptNumber || 2}). See details in the sidebar.`
-              );
-            }
-          } catch (innerError: any) {
-            console.error('Error in adapted test execution:', innerError);
-            vscode.window.showErrorMessage(`Error: ${innerError.message}`);
-            
-            // Reset loading state in case of error
-            if (provider && provider.webview) {
-              provider.webview.postMessage({
-                command: 'stopLoading'
-              });
-            }
+          // Show notification with result
+          if (newTestResult.exploitSuccess) {
+            vscode.window.showWarningMessage(
+              `⚠️ Adapted test (attempt ${attemptNumber}) successfully exploited the vulnerability!`
+            );
+          } else {
+            vscode.window.showInformationMessage(
+              `Adapted test (attempt ${attemptNumber}) did not exploit the vulnerability.`
+            );
           }
         });
-      } catch (error: any) {
-        console.error('Error adapting and running penetration test:', error);
-        vscode.window.showErrorMessage(`Error: ${error.message}`);
-        
-        // Reset loading state in case of error
+      } catch (error) {
+        console.error("❌ Error adapting and running test:", error);
+        vscode.window.showErrorMessage(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      } finally {
+        // Always ensure loading state is reset
         if (provider && provider.webview) {
           provider.webview.postMessage({
             command: 'stopLoading'
@@ -690,6 +674,78 @@ export function activate(context: vscode.ExtensionContext) {
         }
       }
     }),
+
+    // Register a command to run a penetration test and return its output
+    vscode.commands.registerCommand('testsidebarextension.runPenetrationTest', async (testFileUri) => {
+      return await runPenetrationTest(testFileUri.fsPath);
+    }),
+
+    // Generate security report command
+    vscode.commands.registerCommand('testsidebarextension.generateSecurityReport', async () => {
+      try {
+        // Show progress notification
+        await vscode.window.withProgress({
+          location: vscode.ProgressLocation.Notification,
+          title: "Generating security report...",
+          cancellable: false
+        }, async (progress) => {
+          // Get test results from state
+          if (!multipleTestResults || multipleTestResults.length === 0) {
+            throw new Error('No test results available. Run penetration tests first.');
+          }
+          
+          // Get contract code from temp file or active editor
+          let contractCode = '';
+          let contractName = 'Unknown';
+          
+          try {
+            if (fs.existsSync(TEMP_FILE_PATH)) {
+              contractCode = fs.readFileSync(TEMP_FILE_PATH, 'utf8');
+              // Extract contract name from code
+              const match = contractCode.match(/contract\s+(\w+)/);
+              if (match && match[1]) {
+                contractName = match[1];
+              }
+            } else {
+              const editor = vscode.window.activeTextEditor;
+              if (editor) {
+                contractCode = editor.document.getText();
+                // Try to extract contract name from filename if possible
+                const fileName = path.basename(editor.document.fileName, '.sol');
+                if (fileName) {
+                  contractName = fileName;
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Error reading contract code:', error);
+          }
+          
+          if (!contractCode) {
+            throw new Error('No contract code available');
+          }
+          
+          // Generate the security report
+          const reportResult = await generateSecurityReport(
+            contractCode,
+            contractName,
+            multipleTestResults
+          );
+          
+          if (reportResult.success && reportResult.filePath) {
+            // Open the report in the editor
+            const reportUri = vscode.Uri.file(reportResult.filePath);
+            await vscode.window.showTextDocument(reportUri);
+            
+            vscode.window.showInformationMessage(`Security report generated successfully!`);
+          } else {
+            throw new Error(reportResult.error || 'Failed to generate security report');
+          }
+        });
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`Error generating security report: ${error.message}`);
+      }
+    })
   );
   
   // Show files when extension is activated
@@ -1002,44 +1058,20 @@ async function runPenetrationTest(testFilePath: string): Promise<{ success: bool
         
         const testRanSuccessfully = code === 0;
         let exploitSuccess = testRanSuccessfully;
+        
+        // Extract vulnerability summary from test output
+        const vulnerabilitySummaryMatch = testOutput.match(/VULNERABILITY SUMMARY: (.*?)(?:\n|$)/);
         let securityImplication = '';
         
-        // If test fails, it could mean the vulnerability isn't exploitable (good for security)
-        if (!testRanSuccessfully) {
-          // Look for assertion errors that indicate failed exploitation
-          if (testOutput.includes('AssertionError') || testOutput.includes('expected') && testOutput.includes('to be')) {
-            securityImplication = 'The contract appears to be protected against this vulnerability. ' +
-              'The test ran but the exploit was not successful, which is a positive security outcome.';
-            exploitSuccess = false;
-          } else {
-            securityImplication = 'The test failed to run properly. This could be due to technical issues ' +
-              'rather than security protections.';
-          }
-        } else {
-          // Test passed, which means vulnerability was successfully exploited
-          securityImplication = 'The vulnerability was successfully exploited. ' +
-            'This is a security concern that should be addressed.';
+        if (vulnerabilitySummaryMatch && vulnerabilitySummaryMatch[1]) {
+          securityImplication = vulnerabilitySummaryMatch[1].trim();
+          outputChannel.appendLine(`\nVulnerability: ${securityImplication}`);
         }
         
-        outputChannel.appendLine(exploitSuccess 
-          ? '⚠️ Vulnerability EXPLOITED! (security issue found)'
-          : '✅ Exploit FAILED! (contract is protected)');
-        outputChannel.appendLine('========================================');
-        
-        // Sometimes the test might fail but we still want to show the output
-        // If no output, include the test file for reference
-        if (!testOutput) {
-          try {
-            const testCode = fs.readFileSync(testFilePath, 'utf8');
-            testOutput = `No output from test execution.\n\nTest code:\n${testCode}`;
-          } catch (err) {
-            // Ignore file read errors
-          }
-        }
-        
+        // Create the result object with security information
         resolve({
-          success: true, // The test ran (even if exploit failed)
-          exploitSuccess: exploitSuccess,
+          success: testRanSuccessfully,
+          exploitSuccess,
           output: testOutput,
           securityImplication
         });

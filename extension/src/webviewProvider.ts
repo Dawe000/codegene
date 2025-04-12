@@ -19,37 +19,19 @@ export class SidebarWebViewProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [this._extensionUri]
     };
 
-    // Get the local paths for our resources
-    const scriptUri = webviewView.webview.asWebviewUri(
-      vscode.Uri.joinPath(this._extensionUri, 'out', 'webview.js')
-    );
-    
-    const tailwindCssUri = webviewView.webview.asWebviewUri(
-      vscode.Uri.joinPath(this._extensionUri, 'media', 'tailwind.css')
-    );
-    
-    // Create a basic HTML that will load our React app
-    webviewView.webview.html = `
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Smart Contract Analyzer</title>
-        <link rel="stylesheet" href="${tailwindCssUri}">
-      </head>
-      <body>
-        <div id="root">Loading...</div>
-        <script src="${scriptUri}"></script>
-      </body>
-      </html>
-    `;
-    
-    // Handle messages from the webview
-    webviewView.webview.onDidReceiveMessage(message => {
-      console.log('Received message from webview:', message.command);
+    // Add message handler for webview messages
+    webviewView.webview.onDidReceiveMessage(async message => {
+      console.log("Received message from webview:", message.command);
       
       switch (message.command) {
+        case 'adaptPenetrationTest':
+          console.log("Received adaptPenetrationTest command:", message);
+          vscode.commands.executeCommand('testsidebarextension.adaptAndRunPenetrationTest', {
+            testFilePath: message.testFilePath,
+            exploitSuccess: message.exploitSuccess,
+            attemptNumber: message.attemptNumber || 1
+          });
+          break;
         case 'showInfo':
           vscode.window.showInformationMessage(message.text);
           break;
@@ -86,7 +68,36 @@ export class SidebarWebViewProvider implements vscode.WebviewViewProvider {
         case 'adaptAndRunPenetrationTest':
           vscode.commands.executeCommand('testsidebarextension.adaptAndRunPenetrationTest', message);
           break;
+        case 'generateSecurityReport':
+          vscode.commands.executeCommand('testsidebarextension.generateSecurityReport');
+          break;
       }
     });
+
+    // Get the local paths for our resources
+    const scriptUri = webviewView.webview.asWebviewUri(
+      vscode.Uri.joinPath(this._extensionUri, 'out', 'webview.js')
+    );
+    
+    const tailwindCssUri = webviewView.webview.asWebviewUri(
+      vscode.Uri.joinPath(this._extensionUri, 'media', 'tailwind.css')
+    );
+    
+    // Create a basic HTML that will load our React app
+    webviewView.webview.html = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Smart Contract Analyzer</title>
+        <link rel="stylesheet" href="${tailwindCssUri}">
+      </head>
+      <body>
+        <div id="root">Loading...</div>
+        <script src="${scriptUri}"></script>
+      </body>
+      </html>
+    `;
   }
 }

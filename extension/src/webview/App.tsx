@@ -48,7 +48,7 @@ const ScoreIndicator: React.FC<{ score: number }> = ({ score }) => {
 
 interface FileItem {
   name: string;
-  path: string; // Added path property to store full file path
+  path: string;
   isAnalysisResult: boolean;
 }
 
@@ -63,109 +63,6 @@ const LoadingPulse: React.FC = () => (
     ))}
   </div>
 );
-
-const HardhatControls: React.FC<{ isProjectDetected: boolean }> = ({ isProjectDetected }) => {
-  const [nodeStatus, setNodeStatus] = useState<'stopped' | 'running' | 'starting'>('stopped');
-  const [contractAddresses, setContractAddresses] = useState<string[]>([]);
-  
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      const message = event.data;
-      
-      if (message.command === 'hardhatNodeStarted') {
-        setNodeStatus('running');
-        if (message.contractAddresses) {
-          setContractAddresses(message.contractAddresses);
-        }
-      } else if (message.command === 'hardhatNodeStopped') {
-        setNodeStatus('stopped');
-        setContractAddresses([]);
-      }
-    };
-    
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, []);
-  
-  if (!isProjectDetected) {
-    return null;
-  }
-  
-  return (
-    <div className="mb-6 bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 overflow-hidden">
-      <div className="bg-gradient-to-r from-slate-800 to-slate-800/50 px-6 py-4 border-b border-slate-700/50 flex items-center justify-between">
-        <span className="text-sm font-medium flex items-center gap-2">
-          <span className="text-cyan-400">⚙️</span> Hardhat Node Controls
-        </span>
-      </div>
-      
-      <div className="p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <div className={`w-3 h-3 rounded-full ${
-              nodeStatus === 'running' ? 'bg-emerald-500 animate-pulse' : 
-              nodeStatus === 'starting' ? 'bg-amber-500 animate-pulse' : 
-              'bg-red-500'
-            }`}></div>
-            <span className="text-sm font-medium">
-              {nodeStatus === 'running' ? 'Node Running' : 
-               nodeStatus === 'starting' ? 'Starting Node...' : 
-               'Node Stopped'}
-            </span>
-          </div>
-          
-          <div className="flex gap-2">
-            {nodeStatus === 'stopped' && (
-              <button
-                onClick={() => {
-                  setNodeStatus('starting');
-                  vscode.postMessage({
-                    command: 'startNodeAndDeploy'
-                  });
-                }}
-                className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-md text-sm font-medium flex items-center gap-2 hover:shadow-lg hover:shadow-cyan-500/20 transition-all"
-              >
-                <span>▶️</span> Start Node & Deploy
-              </button>
-            )}
-            
-            {nodeStatus === 'running' && (
-              <button
-                onClick={() => {
-                  vscode.postMessage({
-                    command: 'stopNode'
-                  });
-                }}
-                className="px-4 py-2 bg-gradient-to-r from-red-500 to-amber-500 text-white rounded-md text-sm font-medium flex items-center gap-2 hover:shadow-lg hover:shadow-red-500/20 transition-all"
-              >
-                <span>⏹️</span> Stop Node
-              </button>
-            )}
-          </div>
-        </div>
-        
-        {nodeStatus === 'running' && contractAddresses.length > 0 && (
-          <div className="mt-4">
-            <h5 className="text-sm font-medium text-slate-400 mb-2">Deployed Contracts:</h5>
-            <div className="bg-slate-900/50 p-4 rounded-lg max-h-32 overflow-y-auto">
-              {contractAddresses.map((address, i) => (
-                <div key={i} className="text-sm text-slate-300 mb-1 font-mono">
-                  {address}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        
-        {nodeStatus === 'running' && (
-          <div className="mt-4 text-sm bg-slate-900/50 p-3 rounded-lg text-slate-400">
-            <span className="font-medium">JSON-RPC Endpoint:</span> http://localhost:8545
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
 
 const App: React.FC<AppProps> = () => {
   const [files, setFiles] = useState<FileItem[]>([]);
@@ -187,14 +84,12 @@ const App: React.FC<AppProps> = () => {
     exploitSuccess?: boolean;
     securityImplication?: string;
     output?: string;
+    attemptNumber?: number;
   }[] | null>(null);
 
-  // Add these state variables at the top of your component
-  const [activeTab, setActiveTab] = useState<'single' | 'multiple'>('multiple');
   const [expandedTests, setExpandedTests] = useState<number[]>([]);
   const [sortOption, setSortOption] = useState<string>('severity');
 
-  // Add to the existing state variables
   const [adaptedTestResults, setAdaptedTestResults] = useState<{
     attemptNumber: number;
     success: boolean;
@@ -205,7 +100,6 @@ const App: React.FC<AppProps> = () => {
     previousFilePath?: string;
   }[]>([]);
 
-  // Add this function to handle expanding/collapsing test results
   const toggleExpandedTest = (index: number) => {
     if (expandedTests.includes(index)) {
       setExpandedTests(expandedTests.filter(i => i !== index));
@@ -217,11 +111,19 @@ const App: React.FC<AppProps> = () => {
   useEffect(() => {
     const messageHandler = (event: MessageEvent) => {
       const message = event.data;
+      console.log("Received message:", message);
 
       switch (message.command) {
+        case 'startLoading':
+          setIsLoading(true);
+          break;
+
+        case 'stopLoading':
+          setIsLoading(false);
+          break;
+
         case 'displayFiles':
           setIsLoading(false);
-          // Update to handle Hardhat project information
           if (message.isHardhatProject) {
             setProjectDetected(true);
             setProjectInfo({
@@ -250,13 +152,8 @@ const App: React.FC<AppProps> = () => {
           ]);
           break;
 
-        case 'startLoading':
-          setIsLoading(true);
-          break;
-
         case 'displayExploit':
           setIsLoading(false);
-          // Create a simple analysis structure focusing only on the exploit
           setAnalysis({
             overall_score: message.exploit.severity === 'High' ? 20 : 
                            message.exploit.severity === 'Medium' ? 50 : 80,
@@ -287,73 +184,63 @@ const App: React.FC<AppProps> = () => {
             output: message.output,
             filePath: message.filePath
           });
-          // Clear multiple results when showing a single result
           setMultipleTestResults(null);
-          // Make sure we're showing the single test tab
-          setActiveTab('single');
           break;
         
         case 'displayMultiplePenetrationTestResults':
           setIsLoading(false);
           setMultipleTestResults(message.testResults);
-          // Clear single result when showing multiple results
           setPenetrationTestResult(null);
-          // Make sure we're showing the multiple tests tab
-          setActiveTab('multiple');
-          // Auto-expand first test with security issues
           const exploitableIndex = message.testResults.findIndex((t: any) => t.exploitSuccess);
           if (exploitableIndex >= 0) {
             setExpandedTests([exploitableIndex]);
           } else if (message.testResults.length > 0) {
-            setExpandedTests([0]); // Expand first test if no exploitable ones
+            setExpandedTests([0]);
           }
           break;
 
         case 'displayAdaptedPenetrationTestResult':
           setIsLoading(false);
-          // Add the new result to our adaptation history
-          setAdaptedTestResults(prev => [
-            ...prev,
-            {
-              attemptNumber: message.attemptNumber,
-              success: message.success,
-              exploitSuccess: message.exploitSuccess,
-              securityImplication: message.securityImplication,
-              output: message.output,
-              filePath: message.filePath,
-              previousFilePath: message.previousFilePath
-            }
-          ]);
           
-          // If this is an adaptation of a single test, update the penetrationTestResult as well
-          if (penetrationTestResult && 
-              message.previousFilePath === penetrationTestResult.filePath) {
-            setPenetrationTestResult({
-              success: message.success,
-              exploitSuccess: message.exploitSuccess,
-              securityImplication: message.securityImplication,
-              output: message.output,
-              filePath: message.filePath
-            });
-          }
+          // Debug logs to verify message data
+          console.log('🔍 Adaptation result received:', {
+            attemptNumber: message.attemptNumber,
+            exploitSuccess: message.exploitSuccess,
+            filePath: message.filePath,
+            output: message.output?.substring(0, 100) + '...' // Log just the beginning of output
+          });
           
-          // If this is an adaptation of a multiple test, update that test result
-          if (multipleTestResults && multipleTestResults.length > 0) {
-            const updatedResults = multipleTestResults.map(result => {
-              if (result.filePath === message.previousFilePath) {
-                return {
-                  ...result,
-                  success: message.success,
-                  exploitSuccess: message.exploitSuccess,
-                  securityImplication: message.securityImplication,
-                  output: message.output,
-                  filePath: message.filePath
-                };
-              }
-              return result;
-            });
-            setMultipleTestResults(updatedResults);
-          }
+          // Force update adaptedTestResults with functional update
+          setAdaptedTestResults(currentResults => {
+            const newResult = {
+              attemptNumber: message.attemptNumber || 0,
+              success: message.success || false,
+              exploitSuccess: message.exploitSuccess || false,
+              securityImplication: message.securityImplication || '',
+              output: message.output || '',
+              filePath: message.filePath || '',
+              previousFilePath: message.previousFilePath || ''
+            };
+            
+            console.log('📊 Current adaptedTestResults count:', currentResults.length);
+            console.log('➕ Adding new result to adaptedTestResults');
+            
+            // Return a new array to ensure React detects the change
+            return [...currentResults, newResult];
+          });
+          
+          break;
+
+        case 'penetrationTestResult':
+          setIsLoading(false);
+          setPenetrationTestResult({
+            success: message.success,
+            exploitSuccess: message.exploitSuccess,
+            securityImplication: message.securityImplication,
+            output: message.output,
+            filePath: message.filePath
+          });
+          // Do NOT clear adaptedTestResults here
           break;
       }
     };
@@ -362,14 +249,16 @@ const App: React.FC<AppProps> = () => {
     return () => window.removeEventListener('message', messageHandler);
   }, []);
 
-  // Function to trigger analysis of all contracts
+  // Debug effect to monitor state changes
+  useEffect(() => {
+    console.log("adaptedTestResults updated:", adaptedTestResults);
+  }, [adaptedTestResults]);
+
   const analyzeAllContracts = () => {
     vscode.postMessage({
       command: 'analyzeAllContracts'
     });
   };
-
-
 
   const renderCategorySection = (title: string, data: any) => {
     if (!data) {
@@ -382,7 +271,6 @@ const App: React.FC<AppProps> = () => {
       );
     }
 
-    // Special handling for vulnerabilities with exploits
     if (title === 'Vulnerabilities' && data && data.exploits && data.exploits.length > 0) {
       return (
         <div className="relative bg-slate-800/50 backdrop-blur-sm rounded-xl p-6 border border-slate-700/50 hover:border-slate-600/50 transition-all duration-300">
@@ -394,7 +282,6 @@ const App: React.FC<AppProps> = () => {
               <ScoreIndicator score={data.score} />
             </div>
 
-            {/* Display vulnerability details */}
             <div className="space-y-6">
               {data.details && data.details.map((detail: string, index: number) => (
                 <div key={index} className="bg-slate-900/50 rounded-lg p-4 border border-slate-700/50">
@@ -402,7 +289,6 @@ const App: React.FC<AppProps> = () => {
                 </div>
               ))}
               
-              {/* Update to use the renamed VulnerabilityCard component */}
               {data.exploits && data.exploits.map((vulnerability: any, index: number) => (
                 <VulnerabilityCard key={index} vulnerability={vulnerability} />
               ))}
@@ -453,7 +339,6 @@ const App: React.FC<AppProps> = () => {
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 p-6">
-      {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <h3 className="text-2xl font-bold flex items-center gap-3 bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">
           <span className="text-2xl">⚡</span>
@@ -468,7 +353,6 @@ const App: React.FC<AppProps> = () => {
         )}
       </div>
 
-      {/* Project Info Section - Simplified without file paths */}
       {projectDetected ? (
         <div className="mb-8 bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50">
           <div className="bg-gradient-to-r from-slate-800 to-slate-800/50 px-6 py-4 rounded-t-xl border-b border-slate-700/50 flex items-center justify-between">
@@ -483,7 +367,6 @@ const App: React.FC<AppProps> = () => {
                 Analyze All Contracts
               </button>
               
-              {/* Only show penetration test button after analysis */}
               {analysis && analysis.vulnerabilities && analysis.vulnerabilities.exploits && (
                 <button
                   className="bg-gradient-to-r from-red-500 to-amber-500 text-white px-4 py-2 rounded-full text-xs font-medium transition-all duration-300 transform hover:scale-105 shadow-lg shadow-red-500/20 hover:shadow-red-500/40"
@@ -507,7 +390,6 @@ const App: React.FC<AppProps> = () => {
               </div>
             </div>
             
-            {/* Contracts List - Simplified without paths */}
             {files.length > 0 && (
               <div className="mt-4">
                 <h5 className="text-sm font-medium text-slate-400 mb-2">Contracts:</h5>
@@ -561,10 +443,6 @@ const App: React.FC<AppProps> = () => {
         </div>
       )}
 
-      {/* Hardhat Controls */}
-      <HardhatControls isProjectDetected={projectDetected} />
-
-      {/* Analysis Results */}
       {analysis && (
         <div className="mb-8">
           <div className="mb-6 flex items-center justify-between">
@@ -577,13 +455,6 @@ const App: React.FC<AppProps> = () => {
             {typeof analysis.overall_score === 'number' && (
               <div className="flex items-center bg-slate-800/50 backdrop-blur-sm py-2 px-6 rounded-full border border-slate-700/50">
                 <span className="mr-3 text-slate-400">Overall Score</span>
-                <span className={`text-2xl font-bold ${
-                  analysis.overall_score >= 80 ? 'text-emerald-400' :
-                  analysis.overall_score >= 50 ? 'text-amber-400' :
-                  'text-red-400'
-                }`}>
-                  {analysis.overall_score}
-                </span>
               </div>
             )}
           </div>
@@ -612,399 +483,234 @@ const App: React.FC<AppProps> = () => {
         </div>
       )}
 
-      {/* ===== SECURITY TESTING SECTION ===== */}
       {(penetrationTestResult || (multipleTestResults && multipleTestResults.length > 0)) && (
-        <div className="mb-8 mt-8 border-t border-slate-700 pt-8">
-          <div className="mb-6">
-            <h2 className="text-2xl font-bold text-slate-200 mb-2">Security Testing Results</h2>
-            <p className="text-slate-400 text-sm">
-              Smart contract penetration tests to assess exploitability of potential vulnerabilities
-            </p>
-          </div>
-          
-          {/* Tab navigation for single vs multiple tests */}
-          {penetrationTestResult && multipleTestResults && multipleTestResults.length > 0 && (
-            <div className="flex border-b border-slate-700 mb-6">
-              <button 
-                className={`px-4 py-2 text-sm font-medium ${activeTab === 'single' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-400'}`}
-                onClick={() => setActiveTab('single')}
-              >
-                Individual Test
-              </button>
-              <button 
-                className={`px-4 py-2 text-sm font-medium ${activeTab === 'multiple' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-400'}`}
-                onClick={() => setActiveTab('multiple')}
-              >
-                Vulnerability Tests ({multipleTestResults.length})
-              </button>
-            </div>
-          )}
-          
-          {/* Single test result */}
-          {penetrationTestResult && (!multipleTestResults || activeTab === 'single') && (
-            <div className={`bg-slate-800/50 backdrop-blur-sm rounded-xl border ${
-              penetrationTestResult.exploitSuccess 
-                ? 'border-red-700/50' 
-                : 'border-emerald-700/50'
-            } overflow-hidden mb-6`}>
-              <div className={`px-6 py-4 border-b ${
-                penetrationTestResult.exploitSuccess 
-                  ? 'border-red-700/50 bg-gradient-to-r from-red-500/20 to-red-500/5' 
-                  : 'border-emerald-700/50 bg-gradient-to-r from-emerald-500/20 to-emerald-500/5'
-              } flex items-center justify-between`}>
-                <div className="flex items-center gap-2">
-                  {penetrationTestResult.exploitSuccess 
-                    ? <span className="text-red-400">⚠️</span> 
-                    : <span className="text-emerald-400">✅</span>}
-                  <span className="font-semibold">
-                    {penetrationTestResult.exploitSuccess 
-                      ? 'Vulnerability Exploited' 
-                      : 'Contract Protected'}
-                  </span>
-                </div>
-                <div className={`px-3 py-1 rounded-full text-xs ${
-                  penetrationTestResult.exploitSuccess 
-                    ? 'bg-red-500/30 text-red-300 border border-red-500/50' 
-                    : 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/50'
-                }`}>
-                  {penetrationTestResult.exploitSuccess ? 'Security Risk' : 'Secure'}
-                </div>
+        <div className="mb-8">
+          <div className="mb-6 flex items-center justify-between">
+            <h4 className="text-xl font-bold text-slate-200">Penetration Test Results</h4>
+            
+            {multipleTestResults && multipleTestResults.length > 0 && (
+              <div className="bg-slate-800/50 backdrop-blur-sm rounded-full p-1 border border-slate-700/50 flex items-center text-xs">
+                <span className="text-slate-400 ml-2 mr-2">Sort by:</span>
+                <button
+                  className={`px-3 py-1 rounded-full ${sortOption === 'severity' ? 'bg-slate-700 text-white' : 'text-slate-400'}`}
+                  onClick={() => setSortOption('severity')}
+                >
+                  Severity
+                </button>
+                <button
+                  className={`px-3 py-1 rounded-full ${sortOption === 'success' ? 'bg-slate-700 text-white' : 'text-slate-400'}`}
+                  onClick={() => setSortOption('success')}
+                >
+                  Exploitable
+                </button>
               </div>
-              
-              {penetrationTestResult.securityImplication && (
-                <div className="px-6 py-4 border-b border-slate-700/50 bg-slate-800/80">
-                  <h4 className="text-sm font-medium text-slate-300 mb-2">Security Implication</h4>
-                  <p className="text-slate-400 text-sm">{penetrationTestResult.securityImplication}</p>
+            )}
+          </div>
+
+          {penetrationTestResult && (
+            <div className="space-y-4 mb-8">
+              <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 overflow-hidden">
+                <div className={`p-6 ${
+                  penetrationTestResult.exploitSuccess 
+                    ? 'bg-red-500/10 border-b border-red-500/20' 
+                    : 'bg-emerald-500/10 border-b border-emerald-500/20'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-3 mb-2">
+                        <h5 className="text-lg font-semibold text-white">Test Results</h5>
+                        <span className={`text-sm px-3 py-1 rounded-full ${
+                          penetrationTestResult.exploitSuccess 
+                            ? 'bg-red-500/30 text-red-400 border border-red-500/50' 
+                            : 'bg-emerald-500/30 text-emerald-400 border border-emerald-500/50'
+                        }`}>
+                          {penetrationTestResult.exploitSuccess ? 'Vulnerability Exploited' : 'Test Failed'}
+                        </span>
+                      </div>
+                      
+                      {penetrationTestResult.securityImplication && (
+                        <div className="mb-4 p-4 bg-slate-900/50 rounded-lg text-sm text-slate-300">
+                          <strong className="text-white">Vulnerability:</strong> {penetrationTestResult.securityImplication}
+                        </div>
+                      )}
+                    </div>
+                    
+                    <button
+                      className="bg-gradient-to-r from-cyan-500 to-blue-500 text-white px-4 py-2 rounded-full text-xs font-medium transition-all duration-300 hover:shadow-lg hover:shadow-cyan-500/20"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        console.log('Retry clicked once for:', penetrationTestResult.filePath);
+                        vscode.postMessage({
+                          command: 'adaptPenetrationTest',
+                          testFilePath: penetrationTestResult.filePath,
+                          exploitSuccess: penetrationTestResult.exploitSuccess || false
+                        });
+                      }}
+                    >
+                      {penetrationTestResult.exploitSuccess ? 'Optimize Exploit' : 'Retry Exploit'}
+                    </button>
+                  </div>
                 </div>
-              )}
-              
-              <div className="p-6">
-                <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700/50 max-h-80 overflow-y-auto">
-                  <pre className="whitespace-pre-wrap text-slate-300 text-xs font-mono overflow-x-auto">
+                
+                <div className="p-6">
+                  <h6 className="font-medium text-sm text-slate-400 mb-3">Test Output</h6>
+                  <pre className="bg-slate-900/50 text-slate-300 p-4 rounded-lg text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-64 overflow-y-auto">
                     {penetrationTestResult.output}
                   </pre>
                 </div>
-                
-                <div className="mt-4 flex justify-between">
-                  <button
-                    className="px-4 py-2 bg-amber-600/50 text-amber-300 rounded-md text-sm font-medium hover:bg-amber-600/70 flex items-center gap-2"
-                    onClick={() => {
-                      // Get the most recent adapted test or the original
-                      const mostRecentTest = adaptedTestResults.length > 0 
-                        ? adaptedTestResults[adaptedTestResults.length - 1] 
-                        : { filePath: penetrationTestResult.filePath, output: penetrationTestResult.output, exploitSuccess: penetrationTestResult.exploitSuccess };
-                        
-                      const attemptNumber = adaptedTestResults.length > 0
-                        ? adaptedTestResults[adaptedTestResults.length - 1].attemptNumber + 1
-                        : 2;
-                        
-                      vscode.postMessage({
-                        command: 'adaptAndRunPenetrationTest',
-                        filePath: mostRecentTest.filePath,
-                        output: mostRecentTest.output,
-                        exploitSuccess: mostRecentTest.exploitSuccess,
-                        attemptNumber: attemptNumber
-                      });
-                    }}
-                  >
-                    <span>🔄</span> Try with Adapted Approach
-                  </button>
+              </div>
+              
+              {/* Show adaptation history if available */}
+              {adaptedTestResults.length > 0 && (
+                <div className="mt-4 pl-8 border-l-2 border-cyan-500/30">
+                  <h5 className="text-md font-semibold text-slate-300 mb-4">
+                    Adaptation History ({adaptedTestResults.length} attempts)
+                  </h5>
                   
-                  <button
-                    className="px-4 py-2 bg-slate-700/50 text-slate-300 rounded-md text-sm font-medium hover:bg-slate-700"
-                    onClick={() => {
-                      vscode.postMessage({
-                        command: 'openFile',
-                        path: penetrationTestResult.filePath
-                      });
-                    }}
-                  >
-                    View Test File
-                  </button>
-                </div>
-                
-                {/* Adaptation History */}
-                {adaptedTestResults.length > 0 && (
-                  <div className="mt-6 border-t border-slate-700/50 pt-6">
-                    <h5 className="text-sm font-semibold text-slate-300 mb-3">Adaptation History</h5>
-                    
-                    <div className="space-y-3">
-                      {adaptedTestResults.map((result, index) => (
-                        <div key={index} className="bg-slate-900/50 p-3 rounded-lg border border-slate-700/50">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                              <span className="text-amber-400 text-sm">Attempt #{result.attemptNumber}</span>
-                              {result.exploitSuccess ? (
-                                <span className="text-xs px-2 py-0.5 bg-red-500/30 text-red-300 rounded-full">Exploit Succeeded</span>
-                              ) : (
-                                <span className="text-xs px-2 py-0.5 bg-emerald-500/30 text-emerald-300 rounded-full">Protected</span>
+                  <div className="space-y-4">
+                    {adaptedTestResults.map((result, index) => (
+                      <div 
+                        key={index} 
+                        className={`bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 overflow-hidden ${
+                          result.exploitSuccess ? 'ring-1 ring-red-500' : ''
+                        }`}
+                      >
+                        <div className={`p-4 ${
+                          result.exploitSuccess 
+                            ? 'bg-red-500/10 border-b border-red-500/20' 
+                            : 'bg-emerald-500/10 border-b border-emerald-500/20'
+                        }`}>
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="flex items-center gap-3 mb-2">
+                                <h5 className="text-md font-semibold text-white">Attempt #{result.attemptNumber}</h5>
+                                <span className={`text-xs px-3 py-1 rounded-full ${
+                                  result.exploitSuccess 
+                                    ? 'bg-red-500/30 text-red-400 border border-red-500/50' 
+                                    : 'bg-emerald-500/30 text-emerald-400 border border-emerald-500/50'
+                                }`}>
+                                  {result.exploitSuccess ? 'Exploit Successful' : 'Exploit Failed'}
+                                </span>
+                              </div>
+                              
+                              {result.securityImplication && (
+                                <div className="mb-4 p-3 bg-slate-900/50 rounded-lg text-sm text-slate-300">
+                                  <strong className="text-white">Vulnerability:</strong> {result.securityImplication}
+                                </div>
                               )}
                             </div>
-                            
-                            <button
-                              className="text-xs text-slate-400 hover:text-slate-300"
-                              onClick={() => {
-                                vscode.postMessage({
-                                  command: 'openFile',
-                                  path: result.filePath
-                                });
-                              }}
-                            >
-                              View Test
-                            </button>
-                          </div>
-                          
-                          <div className="text-xs text-slate-400 line-clamp-2">
-                            {result.securityImplication || 'Adapted test based on previous results'}
                           </div>
                         </div>
-                      ))}
-                    </div>
+                        
+                        <div className="p-4">
+                          <details>
+                            <summary className="cursor-pointer text-sm text-slate-400 mb-2">View Test Output</summary>
+                            <pre className="bg-slate-900/50 text-slate-300 p-4 rounded-lg text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-64 overflow-y-auto mt-2">
+                              {result.output}
+                            </pre>
+                          </details>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           )}
-          
-          {/* Multiple test results */}
-          {multipleTestResults && multipleTestResults.length > 0 && (!penetrationTestResult || activeTab === 'multiple') && (
+
+          {multipleTestResults && multipleTestResults.length > 0 && (
             <div className="space-y-4">
-              <div className="flex justify-between items-center mb-4">
-                <div className="flex gap-2 items-center">
-                  <div className="text-sm px-3 py-1 bg-red-500/20 border border-red-500/50 rounded-full text-red-300">
-                    {multipleTestResults.filter(t => t.exploitSuccess).length} Exploitable
-                  </div>
-                  <div className="text-sm px-3 py-1 bg-emerald-500/20 border border-emerald-500/50 rounded-full text-emerald-300">
-                    {multipleTestResults.filter(t => !t.exploitSuccess).length} Protected
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <select 
-                    className="bg-slate-800 border border-slate-700 text-slate-300 rounded px-3 py-1 text-sm"
-                    onChange={(e) => setSortOption(e.target.value)}
-                    value={sortOption}
-                  >
-                    <option value="severity">Sort by Severity</option>
-                    <option value="exploitable">Exploitable First</option>
-                    <option value="protected">Protected First</option>
-                  </select>
-                </div>
-              </div>
-            
               {multipleTestResults
                 .sort((a, b) => {
-                  if (sortOption === 'exploitable') return a.exploitSuccess ? -1 : 1;
-                  if (sortOption === 'protected') return a.exploitSuccess ? 1 : -1;
-                  return 0; // Default or severity
+                  if (sortOption === 'severity') {
+                    return a.vulnerability.localeCompare(b.vulnerability);
+                  } else {
+                    return (b.exploitSuccess ? 1 : 0) - (a.exploitSuccess ? 1 : 0);
+                  }
                 })
-                .map((result, index) => (
-                  <div 
-                    key={index} 
-                    className={`bg-slate-800/50 backdrop-blur-sm rounded-xl border ${
-                      result.exploitSuccess 
-                        ? 'border-red-700/50' 
-                        : 'border-emerald-700/50'
-                    } overflow-hidden transition-all duration-200`}
-                  >
+                .map((test, index) => (
+                  <div key={index} className="space-y-4">
                     <div 
-                      className={`px-6 py-4 border-b ${
-                        result.exploitSuccess 
-                          ? 'border-red-700/50 bg-gradient-to-r from-red-500/20 to-red-500/5' 
-                          : 'border-emerald-700/50 bg-gradient-to-r from-emerald-500/20 to-emerald-500/5'
-                      } flex items-center justify-between cursor-pointer`}
-                      onClick={() => toggleExpandedTest(index)}
+                      className={`bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 overflow-hidden ${
+                        test.exploitSuccess ? 'ring-1 ring-red-500' : ''
+                      }`}
                     >
-                      <div className="flex items-center gap-2">
-                        {result.exploitSuccess 
-                          ? <span className="text-red-400">⚠️</span> 
-                          : <span className="text-emerald-400">✅</span>}
-                        <span className="font-semibold">{result.vulnerability}</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className={`px-3 py-1 rounded-full text-xs ${
-                          result.exploitSuccess 
-                            ? 'bg-red-500/30 text-red-300 border border-red-500/50' 
-                            : 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/50'
-                        }`}>
-                          {result.exploitSuccess ? 'Exploitable' : 'Protected'}
-                        </div>
-                        <span className="text-slate-400 text-lg">
-                          {expandedTests.includes(index) ? '▼' : '▶'}
-                        </span>
-                      </div>
-                    </div>
-                    
-                    {expandedTests.includes(index) && (
-                      <>
-                        {result.securityImplication && (
-                          <div className="px-6 py-4 border-b border-slate-700/50 bg-slate-800/80">
-                            <h4 className="text-sm font-medium text-slate-300 mb-2">Security Implication</h4>
-                            <p className="text-slate-400 text-sm">{result.securityImplication}</p>
-                          </div>
-                        )}
-                        
-                        <div className="p-6">
-                          <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700/50 max-h-60 overflow-y-auto">
-                            <pre className="whitespace-pre-wrap text-slate-300 text-xs font-mono overflow-x-auto">
-                              {result.output?.substring(0, 800) || 'No output available'}
-                              {result.output && result.output.length > 800 ? '...' : ''}
-                            </pre>
+                      <div className={`p-6 ${
+                        test.exploitSuccess 
+                          ? 'bg-red-500/10 border-b border-red-500/20' 
+                          : 'bg-slate-700/30 border-b border-slate-600/20'
+                      }`}>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="flex items-center gap-3 mb-2">
+                              <h5 className="text-lg font-semibold text-white">{test.vulnerability}</h5>
+                              <span className={`text-sm px-3 py-1 rounded-full ${
+                                test.exploitSuccess 
+                                  ? 'bg-red-500/30 text-red-400 border border-red-500/50' 
+                                  : 'bg-slate-500/30 text-slate-400 border border-slate-500/50'
+                              }`}>
+                                {test.exploitSuccess ? 'Exploitable' : 'Not Exploitable'}
+                              </span>
+                            </div>
+                            
+                            {test.securityImplication && (
+                              <div className="mb-4 p-4 bg-slate-900/50 rounded-lg text-sm text-slate-300">
+                                <strong className="text-white">Vulnerability:</strong> {test.securityImplication}
+                              </div>
+                            )}
                           </div>
                           
-                          <div className="mt-4 flex justify-between">
+                          <div className="flex gap-2">
                             <button
-                              className="px-4 py-2 bg-amber-600/50 text-amber-300 rounded-md text-sm font-medium hover:bg-amber-600/70 flex items-center gap-2"
-                              onClick={() => {
-                                // Find any adaptations for this test
-                                const adaptations = adaptedTestResults.filter(ar => 
-                                  ar.previousFilePath === result.filePath || 
-                                  adaptedTestResults.some(a => a.filePath === ar.previousFilePath)
-                                );
-                                
-                                // Get the most recent attempt number
-                                const attemptNumber = adaptations.length > 0
-                                  ? Math.max(...adaptations.map(a => a.attemptNumber)) + 1
-                                  : 2;
-                                
-                                // Get the most recent test file path
-                                const mostRecentFilePath = adaptations.length > 0
-                                  ? adaptations.reduce((latest, current) => 
-                                      current.attemptNumber > (latest?.attemptNumber || 0) ? current : latest, 
-                                      { filePath: result.filePath, attemptNumber: 1 }
-                                    ).filePath
-                                  : result.filePath;
-                                  
-                                vscode.postMessage({
-                                  command: 'adaptAndRunPenetrationTest',
-                                  filePath: mostRecentFilePath,
-                                  output: result.output || '',
-                                  exploitSuccess: result.exploitSuccess,
-                                  attemptNumber: attemptNumber
-                                });
-                              }}
+                              className="bg-slate-700 text-slate-300 p-2 rounded-full text-xs transition-all duration-300 hover:bg-slate-600"
+                              onClick={() => toggleExpandedTest(index)}
                             >
-                              <span>🔄</span> Try Adapted Approach
+                              {expandedTests.includes(index) ? '▼ Hide' : '▶ Show'} Details
                             </button>
                             
                             <button
-                              className="px-4 py-2 bg-slate-700/50 text-slate-300 rounded-md text-sm font-medium hover:bg-slate-700"
+                              className="bg-gradient-to-r from-cyan-500 to-blue-500 text-white px-4 py-2 rounded-full text-xs font-medium transition-all duration-300 hover:shadow-lg hover:shadow-cyan-500/20"
                               onClick={() => {
                                 vscode.postMessage({
-                                  command: 'openFile',
-                                  path: result.filePath
+                                  command: 'adaptPenetrationTest',
+                                  testFilePath: test.filePath,
+                                  exploitSuccess: test.exploitSuccess || false
                                 });
                               }}
                             >
-                              View Test File
+                              {test.exploitSuccess ? 'Optimize Exploit' : 'Retry Exploit'}
                             </button>
                           </div>
                         </div>
-                      </>
-                    )}
+                      </div>
+                      
+                      {expandedTests.includes(index) && test.output && (
+                        <div className="p-6">
+                          <h6 className="font-medium text-sm text-slate-400 mb-3">Test Output</h6>
+                          <pre className="bg-slate-900/50 text-slate-300 p-4 rounded-lg text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-64 overflow-y-auto">
+                            {test.output}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
             </div>
           )}
-        </div>
-      )}
 
-      {/* Multiple Penetration Test Results */}
-      {multipleTestResults && multipleTestResults.length > 0 && (
-        <div className="mb-8">
-          <div className="mb-6 flex items-center justify-between">
-            <h4 className="text-xl font-bold text-slate-200">Vulnerability Penetration Tests</h4>
-            <div className="px-3 py-1 bg-slate-800/50 rounded-full text-xs">
-              {multipleTestResults.filter(t => t.success).length}/{multipleTestResults.length} Exploited
-            </div>
-          </div>
-          
-          <div className="space-y-4">
-            {multipleTestResults.map((result, index) => (
-              <div key={index} className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 overflow-hidden">
-                <div className={`px-6 py-4 border-b border-slate-700/50 flex items-center justify-between ${
-                  result.success 
-                    ? 'bg-gradient-to-r from-red-500/20 to-red-500/5' 
-                    : 'bg-gradient-to-r from-slate-800 to-slate-800/50'
-                }`}>
-                  <div className="flex items-center gap-2">
-                    {result.success 
-                      ? <span className="text-red-400">⚠️</span> 
-                      : <span className="text-slate-400">🛡️</span>}
-                    <span className="font-semibold">{result.vulnerability}</span>
-                  </div>
-                  <div className={`px-2 py-1 rounded-full text-xs ${
-                    result.success 
-                      ? 'bg-red-500/30 text-red-400 border border-red-500/50' 
-                      : 'bg-emerald-500/30 text-emerald-400 border border-emerald-500/50'
-                  }`}>
-                    {result.success ? 'Exploitable' : 'Protected'}
-                  </div>
-                </div>
-                
-                <div className="p-4">
-                  <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700/50 max-h-32 overflow-y-auto">
-                    <pre className="whitespace-pre-wrap text-slate-300 text-xs font-mono">
-                      {result.output?.substring(0, 300) || 'No output available'}
-                      {result.output && result.output.length > 300 ? '...' : ''}
-                    </pre>
-                  </div>
-                  
-                  <div className="mt-4 flex justify-end gap-2">
-                    <button
-                      className="px-4 py-2 bg-slate-700/50 text-slate-300 rounded-md text-sm font-medium"
-                      onClick={() => {
-                        vscode.postMessage({
-                          command: 'openFile',
-                          path: result.filePath
-                        });
-                      }}
-                    >
-                      View Test
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Penetration Test Results */}
-      {penetrationTestResult && (
-        <div className="mb-8">
-          <div className="mb-6 flex items-center justify-between">
-            <h4 className="text-xl font-bold text-slate-200">Penetration Test Results</h4>
-            <div className={`px-3 py-1 rounded-full text-xs ${
-              penetrationTestResult.success 
-                ? 'bg-emerald-500/30 text-emerald-400 border border-emerald-500/50' 
-                : 'bg-red-500/30 text-red-400 border border-red-500/50'
-            }`}>
-              {penetrationTestResult.success ? 'Test Passed' : 'Test Failed'}
-            </div>
-          </div>
-          
-          <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-6">
-            <h5 className="text-lg font-semibold text-white mb-4">Test Output</h5>
-            <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700/50 max-h-96 overflow-y-auto">
-              <pre className="whitespace-pre-wrap text-slate-300 text-sm font-mono">
-                {penetrationTestResult.output || 'No output available'}
-              </pre>
-            </div>
-            
-            <div className="mt-4 flex justify-end">
-              <button
-                className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-md text-sm font-medium"
-                onClick={() => {
-                  vscode.postMessage({
-                    command: 'openFile',
-                    path: penetrationTestResult.filePath
-                  });
-                }}
-              >
-                Open Test File
-              </button>
-            </div>
-          </div>
+          <button 
+            className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-medium shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed mt-4 w-full sm:w-auto"
+            onClick={() => vscode.postMessage({ command: 'generateSecurityReport' })}
+            disabled={!multipleTestResults || multipleTestResults.length === 0}
+          >
+            <span className="flex items-center justify-center">
+              <svg className="w-3 h-3 mr-2" width="50px" height="50px" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Generate Security Report
+            </span>
+          </button>
         </div>
       )}
     </div>

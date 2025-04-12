@@ -434,7 +434,6 @@ export const generatePenetrationTest = async (
     console.log(`Contract code length: ${contractCode.length} characters`);
     console.log(`First 200 chars: ${contractCode.substring(0, 200).replace(/\n/g, '\\n')}...`);
     
-    // Replace the systemPrompt in generatePenetrationTest with this improved version
     const systemPrompt = `You are an expert in smart contract security and penetration testing. 
 Create a standalone TypeScript file that performs penetration testing on the provided smart contract.
 
@@ -446,12 +445,18 @@ IMPORTANT - Create a SELF-CONTAINED test file that works with Hardhat:
    import { expect } from "chai";
    \`\`\`
 
-2. DO NOT try to use a separate attacker contract. Instead:
+2. DO NOT create or use separate attacker contracts - your test MUST be self-contained
    - Create attack functions directly in the test
    - Use multiple Hardhat signers (accounts) for different roles
    - Interact directly with the vulnerable contract
 
-3. FOCUS on testing ONE specific vulnerability type per test:
+3. TECHNICAL REQUIREMENTS:
+   - Use Hardhat ethers v6 syntax correctly (await contract.waitForDeployment(), await contract.getAddress())
+   - Use ethers.parseEther() for ETH amounts (not ethers.utils.parseEther)
+   - For reentrancy attacks, implement inline fallback functions using the attacker signer
+   - Ethers v6 uses BigInt for numbers - use 0n for zero and handle comparison appropriately
+
+4. FOCUS on testing ONE specific vulnerability type per test:
    - Reentrancy
    - Access control issues
    - Integer overflow/underflow
@@ -477,7 +482,6 @@ describe("[Vulnerability Name] Penetration Test", function() {
   // Increase timeout for complex tests
   this.timeout(60000);
   
-  // Deploy all contracts needed for the test
   it("should successfully exploit the vulnerability", async function() {
     // Get signers
     const [owner, attacker, user1, user2] = await ethers.getSigners();
@@ -542,12 +546,12 @@ export async function runPenetrationTest() {
 
 IMPORTANT NOTES:
 1. DO NOT try to deploy any contracts besides the main contract that's already in the project
-2. DO NOT use ethers.utils (it's deprecated) - use ethers.parseEther() and similar
-3. Call waitForDeployment() after deploying contracts
-4. Ensure all contract function calls use the correct syntax for ethers v6
-5. Ethers v6 uses BigInt for numbers - use 0n for zero and handle comparison appropriately
+2. DO NOT reference any external attacker contracts like "MaliciousContract" - all code must be in the test file
+3. For reentrancy attacks, DO NOT create a separate attacker contract - use the test file's logic instead
+4. Most vulnerabilities can be exploited by using multiple accounts and careful sequencing of transactions
+5. Focus on clarity and simplicity to demonstrate the vulnerability
 
-The focus should be on demonstrating how to exploit the vulnerability in the simplest way possible.`;
+Your penetration test must be a single self-contained file that can run without additional dependencies.`;
 
     const requestData: ChatCompletionRequestWithVenice = {
       model: "default",
@@ -597,6 +601,26 @@ The focus should be on demonstrating how to exploit the vulnerability in the sim
     let testCode = content;
     if (codeMatch && codeMatch[1]) {
       testCode = codeMatch[1];
+    }
+    
+    // NEW: Validate and correct the test before saving
+    console.log("🧪 Validating and correcting penetration test...");
+    try {
+      const validationResult = await validateAndCorrectTest(
+        testCode, 
+        contractCode, 
+        vulnerabilityType || "unknown"
+      );
+      
+      if (validationResult.success && validationResult.correctedCode) {
+        console.log("✅ Test validation and correction successful");
+        testCode = validationResult.correctedCode;
+      } else {
+        console.warn("⚠️ Test validation failed, using original code:", validationResult.error);
+      }
+    } catch (validationError) {
+      console.error("❌ Error during test validation:", validationError);
+      // Continue with original code if validation fails
     }
     
     // Make sure we don't save the "FILENAME:" comment if it's in the code
@@ -753,9 +777,9 @@ export const adaptPenetrationTest = async (
     } catch (err) {
       console.error('Error reading test file:', err);
       if (err instanceof Error) {
-        throw new Error(`Could not read original test file: ${err.message}`);
+        throw new Error(`Could not read test file: ${err.message}`);
       } else {
-        throw new Error("Could not read original test file: Unknown error");
+        throw new Error('Could not read test file: Unknown error');
       }
     }
     
@@ -769,7 +793,15 @@ Your task is to analyze the results of a previous penetration test and create an
 IMPORTANT CONTEXT:
 1. The previous penetration test ${exploitSuccess ? 'successfully exploited' : 'FAILED to exploit'} the vulnerability
 2. You are on attempt #${attemptNumber} of this penetration test
-3. Your goal is to ${exploitSuccess ? 'make the exploit more efficient or reliable' : 'successfully exploit the vulnerability that the previous test missed'}
+3. You are working with a Hardhat project structure
+4. Your goal is to ${exploitSuccess ? 'make the exploit more efficient or reliable' : 'successfully exploit the vulnerability that the previous test missed'}
+
+TECHNICAL REQUIREMENTS:
+1. DO NOT create or use separate attacker contracts - your test must be self-contained
+2. If you need attacker logic, define attack functions directly in the test
+3. Use Hardhat ethers v6 syntax correctly (await contract.waitForDeployment(), await contract.getAddress())
+4. Use await ethers.provider.getBalance() and ethers.parseEther() for ETH amounts
+5. For reentrancy attacks, implement inline fallback functions using multiple signers
 
 PREVIOUS TEST OUTPUT:
 \`\`\`
@@ -789,85 +821,650 @@ INSTRUCTIONS:
 3. Create a completely new test file that builds on what you learned
 4. Keep using the same style (imports, structure) but improve the exploit logic
 5. Focus on ${exploitSuccess ? 'optimization' : 'making the exploit work'} in this iteration
+6. For reentrancy attacks, use a direct approach without an external attacker contract
 
-Your adapted test should follow the same format as the original test but with improved exploit logic.`;
+Your adapted test must follow Hardhat conventions and not depend on any external contracts.`;
 
-    // Generate the improved test
     const requestData: ChatCompletionRequestWithVenice = {
       model: "default",
       messages: [
-      {
-        role: "system",
-        content: systemPrompt
-      },
-      {
-        role: "user",
-        content: `Here is the smart contract code this test is targeting:
+        {
+          role: "system",
+          content: systemPrompt
+        },
+        {
+          role: "user",
+          content: `Here's the smart contract I'm trying to exploit:
+\`\`\`solidity
+${contractCode}
+\`\`\`
 
-  \`\`\`solidity
-  ${contractCode}
-  \`\`\`
-
-  Based on the previous test output and code, please generate an improved penetration test.`
-      }
+Please analyze the previous test results and create an improved test that targets the same vulnerability but with a ${exploitSuccess ? 'more optimized' : 'working'} exploit approach.`
+        }
       ],
       temperature: 0.1,
       max_tokens: 4000,
       venice_parameters: {
-      include_venice_system_prompt: false
+        include_venice_system_prompt: false
       }
     };
 
-    console.log(`Making API request to Venice for improved test (attempt ${attemptNumber})`);
-    const response = await fetch('https://venice-api.netlify.app/api/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestData)
-    });
-
-    const data = await response.json();
+    console.log("Making API request to Venice for improved test (attempt " + attemptNumber + ")");
+    const response = await openai.createChatCompletion(requestData as any);
     
-    if (!response.ok) {
-      throw new Error(`API returned error: ${data.error || response.statusText}`);
+    if (!response?.data?.choices?.[0]?.message?.content) {
+      throw new Error("Invalid response from API - no content found");
     }
 
-    console.log(`Received response from Venice for improved test (attempt ${attemptNumber})`);
+    // Get the generated test content
+    const content = response.data.choices[0].message.content;
+    console.log(`📥 Raw API response received with length: ${content.length} characters`);
+    console.log(`Response content first 200 chars: ${content.substring(0, 200).replace(/\n/g, '\\n')}...`);
     
-    const generatedContent = data.choices[0].message.content;
-    
-    // Extract the test code from the response
-    const codeBlockMatch = generatedContent.match(/```typescript\s*([\s\S]*?)```/);
-    if (!codeBlockMatch) {
-      throw new Error("Could not extract test code from API response");
+    // Extract the actual TypeScript code
+    const codeMatch = content.match(/```typescript\n([\s\S]*?)\n```/) || 
+                      content.match(/```ts\n([\s\S]*?)\n```/) || 
+                      content.match(/```\n([\s\S]*?)\n```/);
+                      
+    let testCode = content;
+    if (codeMatch && codeMatch[1]) {
+      testCode = codeMatch[1];
     }
     
-    const testCode = codeBlockMatch[1].trim();
-
+    // NEW: Validate and correct the test before saving
+    console.log("🧪 Validating and correcting adapted penetration test...");
+    try {
+      const validationResult = await validateAndCorrectTest(
+        testCode, 
+        contractCode, 
+        vulnerabilityType
+      );
+      
+      if (validationResult.success && validationResult.correctedCode) {
+        console.log("✅ Test validation and correction successful");
+        testCode = validationResult.correctedCode;
+      } else {
+        console.warn("⚠️ Test validation failed, using original code:", validationResult.error);
+      }
+    } catch (validationError) {
+      console.error("❌ Error during test validation:", validationError);
+      // Continue with original code if validation fails
+    }
+    
     // Create a unique filename for the adapted test
     const timestamp = Date.now();
-    const newFilePath = testFilePath.replace(/\.ts$/, `-adapted-${attemptNumber}-${timestamp}.ts`);
-    
+    // Extract just the basename without the path
+    const originalBasename = path.basename(testFilePath);
+    const newFilename = originalBasename.replace(/\.ts$/, `-adapted-${attemptNumber}-${timestamp}.ts`);
+
     // Save the test file
-    try {
-      fs.writeFileSync(newFilePath, testCode);
-      console.log(`✅ Saved adapted test file: ${newFilePath}`);
-    } catch (err) {
-      console.error('Error saving test file:', err);
-      if (err instanceof Error) {
-        throw new Error(`Could not save generated test file: ${err.message}`);
-      } else {
-        throw new Error("Could not save generated test file: Unknown error");
-      }
+    const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspacePath) {
+      throw new Error("No workspace open");
     }
 
+    const testDir = path.join(workspacePath, 'test');
+    if (!fs.existsSync(testDir)) {
+      fs.mkdirSync(testDir, { recursive: true });
+    }
+
+    const filePath = path.join(testDir, newFilename);
+    fs.writeFileSync(filePath, testCode);
+    console.log(`💾 Full test code written to file (${testCode.length} characters)`);
+
+    console.log(`✅ Adapted penetration test saved to ${filePath}`);
+    
     return {
       success: true,
-      filePath: newFilePath
+      filePath
     };
   } catch (error: any) {
     console.error("❌ Error adapting penetration test:", error);
+    console.error("Error details:", error.stack || "No stack trace available");
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
+/**
+ * Validates and corrects a penetration test using Venice API
+ * 
+ * @param testCode The original test code that may have issues
+ * @param contractCode The smart contract being tested
+ * @param vulnerabilityType The type of vulnerability being tested
+ * @returns Promise with corrected test code
+ */
+export const validateAndCorrectTest = async (
+  testCode: string,
+  contractCode: string,
+  vulnerabilityType: string
+): Promise<{success: boolean; correctedCode?: string; error?: string}> => {
+  try {
+    if (!process.env.REACT_APP_VENICE_API_KEY) {
+      console.error("❌ Venice API key is not set");
+      throw new Error("API key is not configured. Set REACT_APP_VENICE_API_KEY environment variable.");
+    }
+
+    console.log(`⭐ Validating and correcting penetration test for ${vulnerabilityType}`);
+    
+    // Extract contract name from the contract code
+    const contractNameMatch = contractCode.match(/contract\s+(\w+)\s*{/);
+    const contractName = contractNameMatch ? contractNameMatch[1] : 'Contract';
+    console.log(`Detected contract name: ${contractName}`);
+    
+    const systemPrompt = `You are an expert in smart contract security testing with Hardhat. 
+You're given a penetration test that may contain issues like external contract dependencies or syntax errors.
+Your task is to correct the test and make it fully self-contained.
+
+REQUIREMENTS FOR THE CORRECTED TEST:
+1. MUST be self-contained (no external contract imports)
+2. Use only these imports: ethers from hardhat, expect from chai
+3. Use correct Hardhat ethers v6 syntax:
+   - await contract.waitForDeployment() instead of .deployed()
+   - await contract.getAddress() instead of .address
+   - ethers.parseEther() instead of ethers.utils.parseEther()
+   - Use BigInt (e.g., 0n) for number comparisons
+
+4. CRITICAL: Use the EXACT contract name "${contractName}" when deploying:
+   \`\`\`typescript
+   // CORRECT:
+   const ${contractName}Factory = await ethers.getContractFactory("${contractName}");
+   const ${contractName.toLowerCase()} = await ${contractName}Factory.deploy();
+   await ${contractName.toLowerCase()}.waitForDeployment();
+   \`\`\`
+
+5. DO NOT include the contract source code directly in the test file
+   
+6. If attack logic requires a separate contract:
+   - Define it directly in the test using inline template strings with ethers
+   \`\`\`typescript
+   const AttackerFactory = await ethers.getContractFactory(\`
+   contract Attacker {
+     // Contract code here
+   }
+   \`);
+   \`\`\`
+
+7. Ensure the test logic is clear and correctly tests the ${vulnerabilityType} vulnerability
+
+RESPOND WITH ONLY THE FULLY CORRECTED TEST CODE WITHOUT ANY EXPLANATIONS.
+DO NOT include markdown formatting, just return valid TypeScript code.`;
+
+    const requestData: ChatCompletionRequestWithVenice = {
+      model: "default",
+      messages: [
+        {
+          role: "system",
+          content: systemPrompt
+        },
+        {
+          role: "user",
+          content: `Here's a penetration test for a ${vulnerabilityType} vulnerability that needs validation and correction:
+
+ORIGINAL TEST CODE:
+\`\`\`typescript
+${testCode}
+\`\`\`
+
+SMART CONTRACT BEING TESTED:
+\`\`\`solidity
+${contractCode}
+\`\`\`
+
+The test is encountering Hardhat artifacts errors. Please fix the test to correctly use the contract name "${contractName}" from my Hardhat project.
+Return ONLY the corrected test code as plain text without any markdown or explanations.`
+        }
+      ],
+      temperature: 0.1,
+      max_tokens: 4000,
+      venice_parameters: {
+        include_venice_system_prompt: false
+      }
+    };
+
+    console.log("📤 Making API request to validate and correct test");
+    const response = await openai.createChatCompletion(requestData as any);
+    
+    if (!response?.data?.choices?.[0]?.message?.content) {
+      throw new Error("Invalid response from API - no content found");
+    }
+
+    // Get the corrected test content
+    let correctedCode = response.data.choices[0].message.content;
+    console.log(`📥 Received corrected test code (${correctedCode.length} characters)`);
+    
+    // Remove any markdown code blocks if present
+    const codeMatch = correctedCode.match(/```typescript\n([\s\S]*?)\n```/) || 
+                    correctedCode.match(/```ts\n([\s\S]*?)\n```/) || 
+                    correctedCode.match(/```\n([\s\S]*?)\n```/);
+                    
+    if (codeMatch && codeMatch[1]) {
+      correctedCode = codeMatch[1];
+    }
+    
+    // Manual post-processing to fix common errors
+    const contractNameRegex = new RegExp(`getContractFactory\\(["']([^"']+)["']\\)`, 'g');
+    let match;
+    const contractsReferenced = [];
+    
+    while ((match = contractNameRegex.exec(correctedCode)) !== null) {
+      if (match[1] !== contractName && !match[1].includes('`')) {
+        contractsReferenced.push(match[1]);
+      }
+    }
+    
+    // Manually fix any remaining incorrect contract references
+    if (contractsReferenced.length > 0) {
+      console.log(`⚠️ Found incorrect contract references: ${contractsReferenced.join(', ')}`);
+      contractsReferenced.forEach(wrongName => {
+        const replaceRegex = new RegExp(`getContractFactory\\(["']${wrongName}["']\\)`, 'g');
+        correctedCode = correctedCode.replace(replaceRegex, `getContractFactory("${contractName}")`);
+      });
+      console.log("✅ Fixed incorrect contract references");
+    }
+    
+    return {
+      success: true,
+      correctedCode
+    };
+  } catch (error: any) {
+    console.error("❌ Error validating and correcting test:", error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
+/**
+ * Generates a comprehensive security report based on penetration test results
+ * 
+ * @param contractCode The original smart contract code
+ * @param contractName The name of the contract
+ * @param testResults Array of test results with vulnerability details
+ * @returns Promise with the report information
+ */
+export const generateSecurityReport = async (
+  contractCode: string,
+  contractName: string,
+  testResults: {
+    vulnerability: string;
+    filePath: string;
+    testCode?: string;
+    output: string;
+    exploitSuccess: boolean;
+    securityImplication?: string;
+  }[]
+): Promise<{success: boolean; report?: string; filePath?: string; error?: string}> => {
+  try {
+    if (!process.env.REACT_APP_VENICE_API_KEY) {
+      console.error("❌ Venice API key is not set");
+      throw new Error("API key is not configured. Set REACT_APP_VENICE_API_KEY environment variable.");
+    }
+
+    console.log(`⭐ Generating security report for ${contractName} based on ${testResults.length} test results`);
+    
+    // Load test code files if not provided
+    const enhancedResults = await Promise.all(testResults.map(async (result) => {
+      if (!result.testCode && result.filePath) {
+        try {
+          result.testCode = fs.readFileSync(result.filePath, 'utf8');
+        } catch (error) {
+          console.error(`Error reading test file ${result.filePath}:`, error);
+        }
+      }
+      return result;
+    }));
+
+    // Extract key source code snippets using pattern recognition
+    const vulnerabilityFunctions = new Map();
+    
+    // Try to identify vulnerable functions from test outputs
+    enhancedResults.forEach(result => {
+      // Look for function mentions in the test code or output
+      const functionNameMatches = (result.testCode || '').match(/\.connect\(attacker\)\.(\w+)\(/g) || 
+                                 (result.output || '').match(/([a-zA-Z]+)\(\).*vulnerable/g);
+      
+      if (functionNameMatches) {
+        for (const match of functionNameMatches) {
+          const funcName = match.match(/\.(\w+)\(/) || match.match(/([a-zA-Z]+)\(\)/);
+          if (funcName && funcName[1]) {
+            // Extract the function from contract code
+            const functionRegex = new RegExp(`function\\s+${funcName[1]}\\s*\\([^{]*\\{[^}]*\\}`, 'g');
+            const functionMatch = contractCode.match(functionRegex);
+            
+            if (functionMatch) {
+              vulnerabilityFunctions.set(funcName[1], {
+                code: functionMatch[0],
+                vulnerability: result.vulnerability,
+                exploitable: result.exploitSuccess
+              });
+            }
+          }
+        }
+      }
+    });
+    
+    // Updated prompt to request HTML format with styling
+    const systemPrompt = `You are an expert smart contract security auditor with deep knowledge of Solidity and common vulnerabilities.
+Generate a comprehensive, actionable security report based on the provided smart contract and penetration test results.
+
+Your response should be VALID HTML with embedded CSS styling. Use the following template structure:
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Security Audit Report for ${contractName}</title>
+  <style>
+    /* Add your CSS styling here */
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f9f9f9;
+    }
+    header {
+      background: linear-gradient(135deg, #20293b, #2c3e50);
+      color: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 30px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    h1 {
+      margin: 0;
+      font-size: 28px;
+    }
+    .report-summary {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 15px;
+    }
+    .summary-item {
+      text-align: center;
+      flex: 1;
+    }
+    .summary-value {
+      font-size: 24px;
+      font-weight: bold;
+    }
+    .summary-label {
+      font-size: 14px;
+      opacity: 0.8;
+    }
+    section {
+      background: white;
+      padding: 25px;
+      margin-bottom: 25px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    h2 {
+      color: #2c3e50;
+      border-bottom: 2px solid #eee;
+      padding-bottom: 10px;
+      margin-top: 0;
+    }
+    h3 {
+      color: #3498db;
+      margin-top: 25px;
+      margin-bottom: 15px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #eee;
+    }
+    .vulnerability {
+      margin-bottom: 30px;
+      border-left: 4px solid #e74c3c;
+      padding-left: 20px;
+    }
+    .vulnerability.safe {
+      border-left-color: #2ecc71;
+    }
+    .severity {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: bold;
+      margin: 5px 0;
+    }
+    .critical { background: #e74c3c; color: white; }
+    .high { background: #e67e22; color: white; }
+    .medium { background: #f39c12; color: white; }
+    .low { background: #3498db; color: white; }
+    code {
+      font-family: 'Consolas', 'Monaco', monospace;
+      background-color: #f8f8f8;
+      padding: 15px;
+      border-radius: 5px;
+      border: 1px solid #ddd;
+      display: block;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      margin: 15px 0;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .code-comparison {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      margin: 20px 0;
+    }
+    .code-column {
+      flex: 1;
+      min-width: 300px;
+    }
+    .code-header {
+      background: #f8f8f8;
+      padding: 8px 15px;
+      border: 1px solid #ddd;
+      border-bottom: none;
+      border-radius: 5px 5px 0 0;
+      font-weight: bold;
+      font-size: 14px;
+      color: #555;
+    }
+    .code-vulnerable { color: #e74c3c; }
+    .code-fixed { color: #27ae60; }
+    .recommendations {
+      background-color: #f1f8e9;
+      padding: 20px;
+      border-radius: 5px;
+      margin: 20px 0;
+      border-left: 4px solid #8bc34a;
+    }
+    .recommendation-item {
+      margin-bottom: 10px;
+      padding-left: 20px;
+      position: relative;
+    }
+    .recommendation-item:before {
+      content: '✓';
+      position: absolute;
+      left: 0;
+      color: #8bc34a;
+      font-weight: bold;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+    }
+    th, td {
+      padding: 12px 15px;
+      text-align: left;
+      border-bottom: 1px solid #ddd;
+    }
+    th {
+      background-color: #f8f8f8;
+      font-weight: bold;
+    }
+    tr:hover {
+      background-color: #f5f5f5;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Security Audit Report for ${contractName}</h1>
+    <div class="report-summary">
+      <!-- Fill in appropriate summary statistics here -->
+    </div>
+  </header>
+
+  <section>
+    <h2>Executive Summary</h2>
+    <!-- Summary here -->
+  </section>
+
+  <section>
+    <h2>Vulnerability Assessment</h2>
+    <!-- Vulnerabilities with code examples here -->
+  </section>
+
+  <section>
+    <h2>Actionable Recommendations</h2>
+    <!-- Recommendations here -->
+  </section>
+
+  <section>
+    <h2>Risk Assessment</h2>
+    <!-- Risk analysis here -->
+  </section>
+</body>
+</html>
+
+CONTENT REQUIREMENTS:
+1. For each vulnerability tested:
+   - Provide a clear technical explanation
+   - Include code snippets showing the vulnerable code
+   - Show side-by-side comparisons of vulnerable vs fixed code
+   - Rate severity: Critical/High/Medium/Low
+   - Provide detailed code fixes with explanations
+
+2. Ensure the HTML is well-structured with:
+   - Clear section headings
+   - Highlighted code snippets
+   - Visual indicators of severity
+   - Formatted tables for comparing risks
+
+3. Focus on actionable advice with specific code examples that developers can directly implement.
+
+IMPORTANT: Return ONLY valid HTML that can be directly saved as an HTML file.`;
+
+    // Create a detailed context with all test results
+    let testResultsContent = enhancedResults.map((result, index) => {
+      return `
+## Test ${index + 1}: ${result.vulnerability}
+
+### Test Code:
+\`\`\`typescript
+${result.testCode || "Code not available"}
+\`\`\`
+
+### Test Output:
+\`\`\`
+${result.output || "Output not available"}
+\`\`\`
+
+### Result: ${result.exploitSuccess ? "Exploit SUCCESSFUL" : "Exploit FAILED"}
+${result.securityImplication ? `### Security Implication: ${result.securityImplication}` : ""}
+`;
+    }).join("\n\n");
+
+    // Add extracted vulnerable functions
+    let vulnerableFunctionsContent = "";
+    if (vulnerabilityFunctions.size > 0) {
+      vulnerableFunctionsContent = "\n\n## Identified Vulnerable Functions\n\n";
+      vulnerabilityFunctions.forEach((info, funcName) => {
+        vulnerableFunctionsContent += `
+### Function: ${funcName}
+Potentially exploitable: ${info.exploitable ? "YES" : "NO"}
+Related to: ${info.vulnerability}
+
+\`\`\`solidity
+${info.code}
+\`\`\`
+`;
+      });
+    }
+
+    const requestData: ChatCompletionRequestWithVenice = {
+      model: "default",
+      messages: [
+        {
+          role: "system",
+          content: systemPrompt
+        },
+        {
+          role: "user",
+          content: `Please analyze the following smart contract and penetration test results to generate a detailed, actionable security report in HTML format with styling.
+
+SMART CONTRACT:
+\`\`\`solidity
+${contractCode}
+\`\`\`
+
+PENETRATION TEST RESULTS:
+${testResultsContent}
+
+${vulnerableFunctionsContent}
+
+Based on the above contract and test results, generate a detailed security report with specific code fixes for each vulnerability. Include both the vulnerable code and the fixed code examples in a well-styled HTML document.`
+        }
+      ],
+      temperature: 0.1,
+      max_tokens: 4000,
+      venice_parameters: {
+        include_venice_system_prompt: false
+      }
+    };
+
+    console.log("📤 Making API request for security report generation");
+    const response = await openai.createChatCompletion(requestData as any);
+    
+    if (!response?.data?.choices?.[0]?.message?.content) {
+      throw new Error("Invalid response from API - no content found");
+    }
+
+    // Get the report content
+    const htmlReport = response.data.choices[0].message.content;
+    console.log(`📥 HTML security report received with length: ${htmlReport.length} characters`);
+    
+    // Save the report to a file
+    const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspacePath) {
+      throw new Error("No workspace open");
+    }
+    
+    const timestamp = new Date().toISOString().replace(/:/g, '-');
+    const reportDir = path.join(workspacePath, 'security-reports');
+    if (!fs.existsSync(reportDir)) {
+      fs.mkdirSync(reportDir, { recursive: true });
+    }
+    
+    // Change the file extension to .html
+    const reportFilename = `${contractName}-SecurityReport-${timestamp}.html`;
+    const filePath = path.join(reportDir, reportFilename);
+    fs.writeFileSync(filePath, htmlReport);
+    
+    console.log(`✅ HTML security report saved to ${filePath}`);
+    
+    return {
+      success: true,
+      report: htmlReport,
+      filePath
+    };
+  } catch (error: any) {
+    console.error("❌ Error generating security report:", error);
     return {
       success: false,
       error: error.message
