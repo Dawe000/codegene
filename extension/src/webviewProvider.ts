@@ -83,6 +83,9 @@ export class SidebarWebViewProvider implements vscode.WebviewViewProvider {
             vscode.window.showTextDocument(fileUri);
           }
           break;
+        case 'adaptAndRunPenetrationTest':
+          vscode.commands.executeCommand('testsidebarextension.adaptAndRunPenetrationTest', message);
+          break;
       }
     });
   }

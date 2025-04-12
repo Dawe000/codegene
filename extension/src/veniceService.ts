@@ -721,3 +721,157 @@ export const generateMultiplePenetrationTests = async (
   }
 };
 
+/**
+ * Analyzes test results and generates an improved test
+ * 
+ * @param contractCode The original contract code
+ * @param testFilePath Path to the original test file
+ * @param testOutput Output from the previous test run
+ * @param exploitSuccess Whether the previous exploit was successful
+ * @param attemptNumber Current attempt number
+ * @returns Promise with path to the new test file
+ */
+export const adaptPenetrationTest = async (
+  contractCode: string,
+  testFilePath: string,
+  testOutput: string,
+  exploitSuccess: boolean,
+  attemptNumber: number
+): Promise<{ success: boolean; filePath?: string; error?: string }> => {
+  try {
+    if (!process.env.REACT_APP_VENICE_API_KEY) {
+      console.error("❌ Venice API key is not set");
+      throw new Error("API key is not configured. Set REACT_APP_VENICE_API_KEY environment variable.");
+    }
+
+    console.log(`⭐ Adapting penetration test (attempt ${attemptNumber})`);
+    
+    // Read the original test file
+    let testFileContent = '';
+    try {
+      testFileContent = fs.readFileSync(testFilePath, 'utf8');
+    } catch (err) {
+      console.error('Error reading test file:', err);
+      if (err instanceof Error) {
+        throw new Error(`Could not read original test file: ${err.message}`);
+      } else {
+        throw new Error("Could not read original test file: Unknown error");
+      }
+    }
+    
+    // Extract vulnerability type from filename
+    const fileNameMatch = path.basename(testFilePath).match(/penetrationTest-[^-]+-(.+)\.ts$/);
+    const vulnerabilityType = fileNameMatch ? fileNameMatch[1] : 'Unknown';
+    
+    const systemPrompt = `You are an expert in smart contract security and penetration testing. 
+Your task is to analyze the results of a previous penetration test and create an improved version.
+
+IMPORTANT CONTEXT:
+1. The previous penetration test ${exploitSuccess ? 'successfully exploited' : 'FAILED to exploit'} the vulnerability
+2. You are on attempt #${attemptNumber} of this penetration test
+3. Your goal is to ${exploitSuccess ? 'make the exploit more efficient or reliable' : 'successfully exploit the vulnerability that the previous test missed'}
+
+PREVIOUS TEST OUTPUT:
+\`\`\`
+${testOutput}
+\`\`\`
+
+PREVIOUS TEST CODE:
+\`\`\`typescript
+${testFileContent}
+\`\`\`
+
+INSTRUCTIONS:
+1. Carefully analyze why the previous test ${exploitSuccess ? 'succeeded' : 'failed'}
+2. ${exploitSuccess 
+    ? 'Refine the successful approach to make it more efficient, reliable, or to extract more value from the exploit' 
+    : 'Identify why the exploit failed and modify the approach to overcome those obstacles'}
+3. Create a completely new test file that builds on what you learned
+4. Keep using the same style (imports, structure) but improve the exploit logic
+5. Focus on ${exploitSuccess ? 'optimization' : 'making the exploit work'} in this iteration
+
+Your adapted test should follow the same format as the original test but with improved exploit logic.`;
+
+    // Generate the improved test
+    const requestData: ChatCompletionRequestWithVenice = {
+      model: "default",
+      messages: [
+      {
+        role: "system",
+        content: systemPrompt
+      },
+      {
+        role: "user",
+        content: `Here is the smart contract code this test is targeting:
+
+  \`\`\`solidity
+  ${contractCode}
+  \`\`\`
+
+  Based on the previous test output and code, please generate an improved penetration test.`
+      }
+      ],
+      temperature: 0.1,
+      max_tokens: 4000,
+      venice_parameters: {
+      include_venice_system_prompt: false
+      }
+    };
+
+    console.log(`Making API request to Venice for improved test (attempt ${attemptNumber})`);
+    const response = await fetch('https://venice-api.netlify.app/api/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestData)
+    });
+
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(`API returned error: ${data.error || response.statusText}`);
+    }
+
+    console.log(`Received response from Venice for improved test (attempt ${attemptNumber})`);
+    
+    const generatedContent = data.choices[0].message.content;
+    
+    // Extract the test code from the response
+    const codeBlockMatch = generatedContent.match(/```typescript\s*([\s\S]*?)```/);
+    if (!codeBlockMatch) {
+      throw new Error("Could not extract test code from API response");
+    }
+    
+    const testCode = codeBlockMatch[1].trim();
+
+    // Create a unique filename for the adapted test
+    const timestamp = Date.now();
+    const newFilePath = testFilePath.replace(/\.ts$/, `-adapted-${attemptNumber}-${timestamp}.ts`);
+    
+    // Save the test file
+    try {
+      fs.writeFileSync(newFilePath, testCode);
+      console.log(`✅ Saved adapted test file: ${newFilePath}`);
+    } catch (err) {
+      console.error('Error saving test file:', err);
+      if (err instanceof Error) {
+        throw new Error(`Could not save generated test file: ${err.message}`);
+      } else {
+        throw new Error("Could not save generated test file: Unknown error");
+      }
+    }
+
+    return {
+      success: true,
+      filePath: newFilePath
+    };
+  } catch (error: any) {
+    console.error("❌ Error adapting penetration test:", error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+

@@ -5,7 +5,7 @@ import * as os from 'os';
 import { spawn } from 'child_process';
 import { SidebarWebViewProvider } from './webviewProvider';
 import { getSolAndRustFileNames, getGroupedFileNames } from './fileNameUtils';
-import { analyzeContract, generatePenetrationTest, generateMultiplePenetrationTests } from './veniceService';
+import { analyzeContract, generatePenetrationTest, generateMultiplePenetrationTests,adaptPenetrationTest } from './veniceService';
 import * as fileUtils from './fileUtils';
 import * as hardhatService from './hardhatService';
 
@@ -537,6 +537,149 @@ export function activate(context: vscode.ExtensionContext) {
         });
       } catch (error: any) {
         console.error('Error generating and running penetration tests:', error);
+        vscode.window.showErrorMessage(`Error: ${error.message}`);
+        
+        // Reset loading state in case of error
+        if (provider && provider.webview) {
+          provider.webview.postMessage({
+            command: 'stopLoading'
+          });
+        }
+      }
+    }),
+
+    // Adapt and run penetration test command
+    vscode.commands.registerCommand('testsidebarextension.adaptAndRunPenetrationTest', async (params) => {
+      try {
+        const { filePath, output, exploitSuccess, attemptNumber } = params;
+        
+        if (!filePath) {
+          throw new Error('No previous test file provided');
+        }
+        
+        if (!lastAnalyzedCode || lastAnalyzedCode.length === 0) {
+          // Try to load from temp file if available
+          try {
+            if (fs.existsSync(TEMP_FILE_PATH)) {
+              lastAnalyzedCode = fs.readFileSync(TEMP_FILE_PATH, 'utf8');
+              console.log(`Loaded ${lastAnalyzedCode.length} characters from temp file`);
+            }
+          } catch (err) {
+            console.error('Error loading from temp file:', err);
+          }
+          
+          if (!lastAnalyzedCode || lastAnalyzedCode.length === 0) {
+            vscode.window.showErrorMessage('No contract code available. Please analyze contracts first.');
+            return;
+          }
+        }
+        
+        // Show progress notification
+        vscode.window.withProgress({
+          location: vscode.ProgressLocation.Notification,
+          title: `Adapting & Running Penetration Test (Attempt ${attemptNumber || 2})`,
+          cancellable: false
+        }, async (progress) => {
+          // Update UI
+          if (provider && provider.webview) {
+            provider.webview.postMessage({
+              command: 'startLoading',
+              message: `Adapting test (attempt ${attemptNumber || 2})...`
+            });
+          }
+          
+          progress.report({ increment: 10, message: "Analyzing previous test results..." });
+          
+          // Generate an adapted test
+          const result = await adaptPenetrationTest(
+            lastAnalyzedCode, 
+            filePath,
+            output,
+            exploitSuccess,
+            attemptNumber || 2
+          );
+          
+          if (!result.success || !result.filePath) {
+            throw new Error(result.error || 'Failed to generate adapted test');
+          }
+          
+          try {
+            // Display generated test code in output channel
+            try {
+              const testCode = fs.readFileSync(result.filePath, 'utf8');
+              outputChannel.appendLine('\n========= ADAPTED PENETRATION TEST CODE =========');
+              outputChannel.appendLine(testCode);
+              outputChannel.appendLine('==================================================');
+            } catch (err) {
+              console.error('Error reading generated test file:', err);
+            }
+            
+            progress.report({ increment: 30, message: "Preparing test environment..." });
+            
+            // Ensure test dependencies
+            const depsReady = await ensureTestDependencies();
+            if (!depsReady) {
+              throw new Error("Failed to prepare test environment. See output channel for details.");
+            }
+            
+            progress.report({ increment: 40, message: "Running adapted test..." });
+            
+            // Run the test
+            const testResult = await runPenetrationTest(result.filePath);
+            
+            // Hide loading indicator
+            if (provider && provider.webview) {
+              provider.webview.postMessage({
+                command: 'stopLoading'
+              });
+            }
+            
+            progress.report({ increment: 20, message: "Complete" });
+            
+            // Show test results in webview
+            if (provider && provider.webview) {
+              provider.webview.postMessage({
+                command: 'displayAdaptedPenetrationTestResult',
+                success: testResult.success,
+                exploitSuccess: testResult.exploitSuccess,
+                securityImplication: testResult.securityImplication,
+                output: testResult.output,
+                filePath: result.filePath,
+                previousFilePath: filePath,
+                attemptNumber: attemptNumber || 2
+              });
+            }
+            
+            // Show notification with result
+            if (testResult.exploitSuccess) {
+              if (exploitSuccess) {
+                vscode.window.showInformationMessage(
+                  `Improved exploit successful on attempt ${attemptNumber || 2}! See details in the sidebar.`
+                );
+              } else {
+                vscode.window.showWarningMessage(
+                  `Vulnerability successfully exploited on attempt ${attemptNumber || 2}! See details in the sidebar.`
+                );
+              }
+            } else if (testResult.success) {
+              vscode.window.showInformationMessage(
+                `Test adapted but exploit still unsuccessful (attempt ${attemptNumber || 2}). See details in the sidebar.`
+              );
+            }
+          } catch (innerError: any) {
+            console.error('Error in adapted test execution:', innerError);
+            vscode.window.showErrorMessage(`Error: ${innerError.message}`);
+            
+            // Reset loading state in case of error
+            if (provider && provider.webview) {
+              provider.webview.postMessage({
+                command: 'stopLoading'
+              });
+            }
+          }
+        });
+      } catch (error: any) {
+        console.error('Error adapting and running penetration test:', error);
         vscode.window.showErrorMessage(`Error: ${error.message}`);
         
         // Reset loading state in case of error

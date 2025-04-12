@@ -194,6 +194,17 @@ const App: React.FC<AppProps> = () => {
   const [expandedTests, setExpandedTests] = useState<number[]>([]);
   const [sortOption, setSortOption] = useState<string>('severity');
 
+  // Add to the existing state variables
+  const [adaptedTestResults, setAdaptedTestResults] = useState<{
+    attemptNumber: number;
+    success: boolean;
+    exploitSuccess?: boolean;
+    securityImplication?: string;
+    output: string;
+    filePath: string;
+    previousFilePath?: string;
+  }[]>([]);
+
   // Add this function to handle expanding/collapsing test results
   const toggleExpandedTest = (index: number) => {
     if (expandedTests.includes(index)) {
@@ -295,6 +306,53 @@ const App: React.FC<AppProps> = () => {
             setExpandedTests([exploitableIndex]);
           } else if (message.testResults.length > 0) {
             setExpandedTests([0]); // Expand first test if no exploitable ones
+          }
+          break;
+
+        case 'displayAdaptedPenetrationTestResult':
+          setIsLoading(false);
+          // Add the new result to our adaptation history
+          setAdaptedTestResults(prev => [
+            ...prev,
+            {
+              attemptNumber: message.attemptNumber,
+              success: message.success,
+              exploitSuccess: message.exploitSuccess,
+              securityImplication: message.securityImplication,
+              output: message.output,
+              filePath: message.filePath,
+              previousFilePath: message.previousFilePath
+            }
+          ]);
+          
+          // If this is an adaptation of a single test, update the penetrationTestResult as well
+          if (penetrationTestResult && 
+              message.previousFilePath === penetrationTestResult.filePath) {
+            setPenetrationTestResult({
+              success: message.success,
+              exploitSuccess: message.exploitSuccess,
+              securityImplication: message.securityImplication,
+              output: message.output,
+              filePath: message.filePath
+            });
+          }
+          
+          // If this is an adaptation of a multiple test, update that test result
+          if (multipleTestResults && multipleTestResults.length > 0) {
+            const updatedResults = multipleTestResults.map(result => {
+              if (result.filePath === message.previousFilePath) {
+                return {
+                  ...result,
+                  success: message.success,
+                  exploitSuccess: message.exploitSuccess,
+                  securityImplication: message.securityImplication,
+                  output: message.output,
+                  filePath: message.filePath
+                };
+              }
+              return result;
+            });
+            setMultipleTestResults(updatedResults);
           }
           break;
       }
@@ -627,7 +685,31 @@ const App: React.FC<AppProps> = () => {
                   </pre>
                 </div>
                 
-                <div className="mt-4 flex justify-end">
+                <div className="mt-4 flex justify-between">
+                  <button
+                    className="px-4 py-2 bg-amber-600/50 text-amber-300 rounded-md text-sm font-medium hover:bg-amber-600/70 flex items-center gap-2"
+                    onClick={() => {
+                      // Get the most recent adapted test or the original
+                      const mostRecentTest = adaptedTestResults.length > 0 
+                        ? adaptedTestResults[adaptedTestResults.length - 1] 
+                        : { filePath: penetrationTestResult.filePath, output: penetrationTestResult.output, exploitSuccess: penetrationTestResult.exploitSuccess };
+                        
+                      const attemptNumber = adaptedTestResults.length > 0
+                        ? adaptedTestResults[adaptedTestResults.length - 1].attemptNumber + 1
+                        : 2;
+                        
+                      vscode.postMessage({
+                        command: 'adaptAndRunPenetrationTest',
+                        filePath: mostRecentTest.filePath,
+                        output: mostRecentTest.output,
+                        exploitSuccess: mostRecentTest.exploitSuccess,
+                        attemptNumber: attemptNumber
+                      });
+                    }}
+                  >
+                    <span>🔄</span> Try with Adapted Approach
+                  </button>
+                  
                   <button
                     className="px-4 py-2 bg-slate-700/50 text-slate-300 rounded-md text-sm font-medium hover:bg-slate-700"
                     onClick={() => {
@@ -640,6 +722,46 @@ const App: React.FC<AppProps> = () => {
                     View Test File
                   </button>
                 </div>
+                
+                {/* Adaptation History */}
+                {adaptedTestResults.length > 0 && (
+                  <div className="mt-6 border-t border-slate-700/50 pt-6">
+                    <h5 className="text-sm font-semibold text-slate-300 mb-3">Adaptation History</h5>
+                    
+                    <div className="space-y-3">
+                      {adaptedTestResults.map((result, index) => (
+                        <div key={index} className="bg-slate-900/50 p-3 rounded-lg border border-slate-700/50">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-amber-400 text-sm">Attempt #{result.attemptNumber}</span>
+                              {result.exploitSuccess ? (
+                                <span className="text-xs px-2 py-0.5 bg-red-500/30 text-red-300 rounded-full">Exploit Succeeded</span>
+                              ) : (
+                                <span className="text-xs px-2 py-0.5 bg-emerald-500/30 text-emerald-300 rounded-full">Protected</span>
+                              )}
+                            </div>
+                            
+                            <button
+                              className="text-xs text-slate-400 hover:text-slate-300"
+                              onClick={() => {
+                                vscode.postMessage({
+                                  command: 'openFile',
+                                  path: result.filePath
+                                });
+                              }}
+                            >
+                              View Test
+                            </button>
+                          </div>
+                          
+                          <div className="text-xs text-slate-400 line-clamp-2">
+                            {result.securityImplication || 'Adapted test based on previous results'}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -729,7 +851,41 @@ const App: React.FC<AppProps> = () => {
                             </pre>
                           </div>
                           
-                          <div className="mt-4 flex justify-end">
+                          <div className="mt-4 flex justify-between">
+                            <button
+                              className="px-4 py-2 bg-amber-600/50 text-amber-300 rounded-md text-sm font-medium hover:bg-amber-600/70 flex items-center gap-2"
+                              onClick={() => {
+                                // Find any adaptations for this test
+                                const adaptations = adaptedTestResults.filter(ar => 
+                                  ar.previousFilePath === result.filePath || 
+                                  adaptedTestResults.some(a => a.filePath === ar.previousFilePath)
+                                );
+                                
+                                // Get the most recent attempt number
+                                const attemptNumber = adaptations.length > 0
+                                  ? Math.max(...adaptations.map(a => a.attemptNumber)) + 1
+                                  : 2;
+                                
+                                // Get the most recent test file path
+                                const mostRecentFilePath = adaptations.length > 0
+                                  ? adaptations.reduce((latest, current) => 
+                                      current.attemptNumber > (latest?.attemptNumber || 0) ? current : latest, 
+                                      { filePath: result.filePath, attemptNumber: 1 }
+                                    ).filePath
+                                  : result.filePath;
+                                  
+                                vscode.postMessage({
+                                  command: 'adaptAndRunPenetrationTest',
+                                  filePath: mostRecentFilePath,
+                                  output: result.output || '',
+                                  exploitSuccess: result.exploitSuccess,
+                                  attemptNumber: attemptNumber
+                                });
+                              }}
+                            >
+                              <span>🔄</span> Try Adapted Approach
+                            </button>
+                            
                             <button
                               className="px-4 py-2 bg-slate-700/50 text-slate-300 rounded-md text-sm font-medium hover:bg-slate-700"
                               onClick={() => {
