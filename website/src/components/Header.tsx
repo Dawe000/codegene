@@ -9,8 +9,8 @@ const Header = () => {
         {/* Replace Shield icon with custom logo */}
         <Box sx={{ mr: 2, display: 'flex', alignItems: 'center' }}>
           <img 
-           // src="/codegene_logo.png" 
-            //alt="CodeGene Logo" 
+            src="/codegene_logo.png" 
+            alt="CodeGene Logo" 
             style={{ height: 40 }}
           />
         </Box>
@@ -43,10 +43,10 @@ const Header = () => {
           <Button 
             variant="contained" 
             color="primary"
-            href="" //link to the AI website 
+            href="https://www.portialabs.ai/" //link to the AI website 
             target="_blank"
           >
-            Powered by ...AI
+            Powered by Portia AI
           </Button>
         </Box>
       </Toolbar>
