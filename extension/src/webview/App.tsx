@@ -175,6 +175,8 @@ const App: React.FC<AppProps> = () => {
   const [projectInfo, setProjectInfo] = useState<{path: string, contractCount: number} | null>(null);
   const [penetrationTestResult, setPenetrationTestResult] = useState<{
     success: boolean;
+    exploitSuccess?: boolean;
+    securityImplication?: string;
     output: string;
     filePath: string;
   } | null>(null);
@@ -182,8 +184,24 @@ const App: React.FC<AppProps> = () => {
     vulnerability: string;
     filePath: string;
     success?: boolean;
+    exploitSuccess?: boolean;
+    securityImplication?: string;
     output?: string;
   }[] | null>(null);
+
+  // Add these state variables at the top of your component
+  const [activeTab, setActiveTab] = useState<'single' | 'multiple'>('multiple');
+  const [expandedTests, setExpandedTests] = useState<number[]>([]);
+  const [sortOption, setSortOption] = useState<string>('severity');
+
+  // Add this function to handle expanding/collapsing test results
+  const toggleExpandedTest = (index: number) => {
+    if (expandedTests.includes(index)) {
+      setExpandedTests(expandedTests.filter(i => i !== index));
+    } else {
+      setExpandedTests([...expandedTests, index]);
+    }
+  };
 
   useEffect(() => {
     const messageHandler = (event: MessageEvent) => {
@@ -253,14 +271,31 @@ const App: React.FC<AppProps> = () => {
           setIsLoading(false);
           setPenetrationTestResult({
             success: message.success,
+            exploitSuccess: message.exploitSuccess,
+            securityImplication: message.securityImplication,
             output: message.output,
             filePath: message.filePath
           });
+          // Clear multiple results when showing a single result
+          setMultipleTestResults(null);
+          // Make sure we're showing the single test tab
+          setActiveTab('single');
           break;
-
+        
         case 'displayMultiplePenetrationTestResults':
           setIsLoading(false);
           setMultipleTestResults(message.testResults);
+          // Clear single result when showing multiple results
+          setPenetrationTestResult(null);
+          // Make sure we're showing the multiple tests tab
+          setActiveTab('multiple');
+          // Auto-expand first test with security issues
+          const exploitableIndex = message.testResults.findIndex((t: any) => t.exploitSuccess);
+          if (exploitableIndex >= 0) {
+            setExpandedTests([exploitableIndex]);
+          } else if (message.testResults.length > 0) {
+            setExpandedTests([0]); // Expand first test if no exploitable ones
+          }
           break;
       }
     };
@@ -514,6 +549,204 @@ const App: React.FC<AppProps> = () => {
               {renderCategorySection('Complexity', analysis.complexity)}
               {renderCategorySection('Upgradability', analysis.upgradability)}
               {renderCategorySection('Behavior', analysis.behavior)}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===== SECURITY TESTING SECTION ===== */}
+      {(penetrationTestResult || (multipleTestResults && multipleTestResults.length > 0)) && (
+        <div className="mb-8 mt-8 border-t border-slate-700 pt-8">
+          <div className="mb-6">
+            <h2 className="text-2xl font-bold text-slate-200 mb-2">Security Testing Results</h2>
+            <p className="text-slate-400 text-sm">
+              Smart contract penetration tests to assess exploitability of potential vulnerabilities
+            </p>
+          </div>
+          
+          {/* Tab navigation for single vs multiple tests */}
+          {penetrationTestResult && multipleTestResults && multipleTestResults.length > 0 && (
+            <div className="flex border-b border-slate-700 mb-6">
+              <button 
+                className={`px-4 py-2 text-sm font-medium ${activeTab === 'single' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-400'}`}
+                onClick={() => setActiveTab('single')}
+              >
+                Individual Test
+              </button>
+              <button 
+                className={`px-4 py-2 text-sm font-medium ${activeTab === 'multiple' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-400'}`}
+                onClick={() => setActiveTab('multiple')}
+              >
+                Vulnerability Tests ({multipleTestResults.length})
+              </button>
+            </div>
+          )}
+          
+          {/* Single test result */}
+          {penetrationTestResult && (!multipleTestResults || activeTab === 'single') && (
+            <div className={`bg-slate-800/50 backdrop-blur-sm rounded-xl border ${
+              penetrationTestResult.exploitSuccess 
+                ? 'border-red-700/50' 
+                : 'border-emerald-700/50'
+            } overflow-hidden mb-6`}>
+              <div className={`px-6 py-4 border-b ${
+                penetrationTestResult.exploitSuccess 
+                  ? 'border-red-700/50 bg-gradient-to-r from-red-500/20 to-red-500/5' 
+                  : 'border-emerald-700/50 bg-gradient-to-r from-emerald-500/20 to-emerald-500/5'
+              } flex items-center justify-between`}>
+                <div className="flex items-center gap-2">
+                  {penetrationTestResult.exploitSuccess 
+                    ? <span className="text-red-400">⚠️</span> 
+                    : <span className="text-emerald-400">✅</span>}
+                  <span className="font-semibold">
+                    {penetrationTestResult.exploitSuccess 
+                      ? 'Vulnerability Exploited' 
+                      : 'Contract Protected'}
+                  </span>
+                </div>
+                <div className={`px-3 py-1 rounded-full text-xs ${
+                  penetrationTestResult.exploitSuccess 
+                    ? 'bg-red-500/30 text-red-300 border border-red-500/50' 
+                    : 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/50'
+                }`}>
+                  {penetrationTestResult.exploitSuccess ? 'Security Risk' : 'Secure'}
+                </div>
+              </div>
+              
+              {penetrationTestResult.securityImplication && (
+                <div className="px-6 py-4 border-b border-slate-700/50 bg-slate-800/80">
+                  <h4 className="text-sm font-medium text-slate-300 mb-2">Security Implication</h4>
+                  <p className="text-slate-400 text-sm">{penetrationTestResult.securityImplication}</p>
+                </div>
+              )}
+              
+              <div className="p-6">
+                <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700/50 max-h-80 overflow-y-auto">
+                  <pre className="whitespace-pre-wrap text-slate-300 text-xs font-mono overflow-x-auto">
+                    {penetrationTestResult.output}
+                  </pre>
+                </div>
+                
+                <div className="mt-4 flex justify-end">
+                  <button
+                    className="px-4 py-2 bg-slate-700/50 text-slate-300 rounded-md text-sm font-medium hover:bg-slate-700"
+                    onClick={() => {
+                      vscode.postMessage({
+                        command: 'openFile',
+                        path: penetrationTestResult.filePath
+                      });
+                    }}
+                  >
+                    View Test File
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* Multiple test results */}
+          {multipleTestResults && multipleTestResults.length > 0 && (!penetrationTestResult || activeTab === 'multiple') && (
+            <div className="space-y-4">
+              <div className="flex justify-between items-center mb-4">
+                <div className="flex gap-2 items-center">
+                  <div className="text-sm px-3 py-1 bg-red-500/20 border border-red-500/50 rounded-full text-red-300">
+                    {multipleTestResults.filter(t => t.exploitSuccess).length} Exploitable
+                  </div>
+                  <div className="text-sm px-3 py-1 bg-emerald-500/20 border border-emerald-500/50 rounded-full text-emerald-300">
+                    {multipleTestResults.filter(t => !t.exploitSuccess).length} Protected
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <select 
+                    className="bg-slate-800 border border-slate-700 text-slate-300 rounded px-3 py-1 text-sm"
+                    onChange={(e) => setSortOption(e.target.value)}
+                    value={sortOption}
+                  >
+                    <option value="severity">Sort by Severity</option>
+                    <option value="exploitable">Exploitable First</option>
+                    <option value="protected">Protected First</option>
+                  </select>
+                </div>
+              </div>
+            
+              {multipleTestResults
+                .sort((a, b) => {
+                  if (sortOption === 'exploitable') return a.exploitSuccess ? -1 : 1;
+                  if (sortOption === 'protected') return a.exploitSuccess ? 1 : -1;
+                  return 0; // Default or severity
+                })
+                .map((result, index) => (
+                  <div 
+                    key={index} 
+                    className={`bg-slate-800/50 backdrop-blur-sm rounded-xl border ${
+                      result.exploitSuccess 
+                        ? 'border-red-700/50' 
+                        : 'border-emerald-700/50'
+                    } overflow-hidden transition-all duration-200`}
+                  >
+                    <div 
+                      className={`px-6 py-4 border-b ${
+                        result.exploitSuccess 
+                          ? 'border-red-700/50 bg-gradient-to-r from-red-500/20 to-red-500/5' 
+                          : 'border-emerald-700/50 bg-gradient-to-r from-emerald-500/20 to-emerald-500/5'
+                      } flex items-center justify-between cursor-pointer`}
+                      onClick={() => toggleExpandedTest(index)}
+                    >
+                      <div className="flex items-center gap-2">
+                        {result.exploitSuccess 
+                          ? <span className="text-red-400">⚠️</span> 
+                          : <span className="text-emerald-400">✅</span>}
+                        <span className="font-semibold">{result.vulnerability}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className={`px-3 py-1 rounded-full text-xs ${
+                          result.exploitSuccess 
+                            ? 'bg-red-500/30 text-red-300 border border-red-500/50' 
+                            : 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/50'
+                        }`}>
+                          {result.exploitSuccess ? 'Exploitable' : 'Protected'}
+                        </div>
+                        <span className="text-slate-400 text-lg">
+                          {expandedTests.includes(index) ? '▼' : '▶'}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    {expandedTests.includes(index) && (
+                      <>
+                        {result.securityImplication && (
+                          <div className="px-6 py-4 border-b border-slate-700/50 bg-slate-800/80">
+                            <h4 className="text-sm font-medium text-slate-300 mb-2">Security Implication</h4>
+                            <p className="text-slate-400 text-sm">{result.securityImplication}</p>
+                          </div>
+                        )}
+                        
+                        <div className="p-6">
+                          <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700/50 max-h-60 overflow-y-auto">
+                            <pre className="whitespace-pre-wrap text-slate-300 text-xs font-mono overflow-x-auto">
+                              {result.output?.substring(0, 800) || 'No output available'}
+                              {result.output && result.output.length > 800 ? '...' : ''}
+                            </pre>
+                          </div>
+                          
+                          <div className="mt-4 flex justify-end">
+                            <button
+                              className="px-4 py-2 bg-slate-700/50 text-slate-300 rounded-md text-sm font-medium hover:bg-slate-700"
+                              onClick={() => {
+                                vscode.postMessage({
+                                  command: 'openFile',
+                                  path: result.filePath
+                                });
+                              }}
+                            >
+                              View Test File
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
             </div>
           )}
         </div>

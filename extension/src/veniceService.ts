@@ -647,12 +647,23 @@ export const generateMultiplePenetrationTests = async (
   contractCode: string,
   contractName: string,
   vulnerabilities: {name: string, description: string, severity: string}[]
-): Promise<{success: boolean; tests: {vulnerability: string, filePath: string, success?: boolean, output?: string}[]; error?: string}> => {
+): Promise<{
+  success: boolean; 
+  tests: {
+    vulnerability: string;
+    filePath: string;
+    success?: boolean;
+    exploitSuccess?: boolean;
+    output?: string;
+    securityImplication?: string;
+  }[]; 
+  error?: string
+}> => {
   try {
     console.log(`⭐ Generating ${vulnerabilities.length} penetration tests for ${contractName}`);
     
     // Array to store test results
-    const tests: {vulnerability: string, filePath: string, success?: boolean, output?: string}[] = [];
+    const tests: {vulnerability: string, filePath: string, success?: boolean, exploitSuccess?: boolean, output?: string, securityImplication?: string}[] = [];
     
     // Generate a test for each vulnerability
     for (const vulnerability of vulnerabilities) {

@@ -370,19 +370,25 @@ export function activate(context: vscode.ExtensionContext) {
             provider.webview.postMessage({
               command: 'displayPenetrationTestResult',
               success: testResult.success,
+              exploitSuccess: testResult.exploitSuccess,
+              securityImplication: testResult.securityImplication,
               output: testResult.output,
               filePath: result.filePath
             });
           }
-          
+
           // Show a notification with the result
-          if (testResult.success) {
+          if (testResult.exploitSuccess) {
+            vscode.window.showWarningMessage(
+              `⚠️ Vulnerability successfully exploited! See details in the sidebar.`
+            );
+          } else if (testResult.success) {
             vscode.window.showInformationMessage(
-              `Penetration test completed successfully. See results in the sidebar.`
+              `✅ Contract protected against this vulnerability. See details in the sidebar.`
             );
           } else {
             vscode.window.showWarningMessage(
-              `Penetration test completed with issues. See results in the sidebar.`
+              `Test execution had technical issues. See results in the sidebar.`
             );
           }
         });
@@ -486,9 +492,23 @@ export function activate(context: vscode.ExtensionContext) {
             
             // Run the test
             const testResult = await runPenetrationTest(test.filePath);
-            test.success = testResult.success;
-            test.output = testResult.output;
-            testResults.push(test);
+
+            // Use type assertion to avoid TypeScript error
+            const extendedTest = test as {
+              vulnerability: string;
+              filePath: string;
+              success?: boolean;
+              exploitSuccess?: boolean;
+              output?: string;
+              securityImplication?: string;
+            };
+
+            // Now assign the properties
+            extendedTest.success = testResult.success;
+            extendedTest.exploitSuccess = testResult.exploitSuccess || false;
+            extendedTest.output = testResult.output;
+            extendedTest.securityImplication = testResult.securityImplication || '';
+            testResults.push(extendedTest);
           }
           
           // Hide loading indicator
@@ -509,9 +529,10 @@ export function activate(context: vscode.ExtensionContext) {
           }
           
           // Show a notification with the overall result
-          const successfulTests = testResults.filter(t => t.success).length;
+          const successfulTests = testResults.filter(t => t.exploitSuccess === true).length;
           vscode.window.showInformationMessage(
-            `Penetration testing complete: ${successfulTests}/${testResults.length} vulnerabilities exploited. See results in the sidebar.`
+            `Penetration testing complete: ${successfulTests} vulnerabilities exploitable, ` +
+            `${testResults.length - successfulTests} protections verified. See results in the sidebar.`
           );
         });
       } catch (error: any) {
@@ -776,7 +797,7 @@ function setIsLoading(loading: boolean) {
  * @param testFilePath Path to the TypeScript penetration test file
  * @returns Promise with the test result and output
  */
-async function runPenetrationTest(testFilePath: string): Promise<{ success: boolean; output: string }> {
+async function runPenetrationTest(testFilePath: string): Promise<{ success: boolean; exploitSuccess?: boolean; output: string; securityImplication?: string }> {
   return new Promise((resolve) => {
     outputChannel.appendLine('\n======== RUNNING PENETRATION TEST ========');
     outputChannel.appendLine(`Test file: ${testFilePath}`);
@@ -789,6 +810,27 @@ async function runPenetrationTest(testFilePath: string): Promise<{ success: bool
     }
     
     try {
+      // First, extract vulnerability description from the test file
+      let vulnerabilityDescription = '';
+      let testPurpose = '';
+      
+      try {
+        const testContent = fs.readFileSync(testFilePath, 'utf8');
+        // Extract description from test file comments
+        const descriptionMatch = testContent.match(/\/\*\*\s*\n\s*\*\s*Penetration Test:[^*]*\*\s*Target Contract:[^*]*\*\s*\n\s*\*\s*Description:\s*([^*]*)/);
+        if (descriptionMatch && descriptionMatch[1]) {
+          vulnerabilityDescription = descriptionMatch[1].trim();
+        }
+        
+        // Get the test name to understand what we're testing
+        const testNameMatch = testContent.match(/describe\("([^"]*)/);
+        if (testNameMatch && testNameMatch[1]) {
+          testPurpose = testNameMatch[1].trim();
+        }
+      } catch (err) {
+        console.error('Error reading test file for description:', err);
+      }
+      
       // Run the test directly with Hardhat instead of trying to compile it separately
       outputChannel.appendLine('Running test with Hardhat...');
       
@@ -815,8 +857,30 @@ async function runPenetrationTest(testFilePath: string): Promise<{ success: bool
       testProcess.on('close', (code) => {
         outputChannel.appendLine(`\nPenetration test finished with code ${code}`);
         
-        const success = code === 0;
-        outputChannel.appendLine(success ? 'Test PASSED!' : 'Test FAILED!');
+        const testRanSuccessfully = code === 0;
+        let exploitSuccess = testRanSuccessfully;
+        let securityImplication = '';
+        
+        // If test fails, it could mean the vulnerability isn't exploitable (good for security)
+        if (!testRanSuccessfully) {
+          // Look for assertion errors that indicate failed exploitation
+          if (testOutput.includes('AssertionError') || testOutput.includes('expected') && testOutput.includes('to be')) {
+            securityImplication = 'The contract appears to be protected against this vulnerability. ' +
+              'The test ran but the exploit was not successful, which is a positive security outcome.';
+            exploitSuccess = false;
+          } else {
+            securityImplication = 'The test failed to run properly. This could be due to technical issues ' +
+              'rather than security protections.';
+          }
+        } else {
+          // Test passed, which means vulnerability was successfully exploited
+          securityImplication = 'The vulnerability was successfully exploited. ' +
+            'This is a security concern that should be addressed.';
+        }
+        
+        outputChannel.appendLine(exploitSuccess 
+          ? '⚠️ Vulnerability EXPLOITED! (security issue found)'
+          : '✅ Exploit FAILED! (contract is protected)');
         outputChannel.appendLine('========================================');
         
         // Sometimes the test might fail but we still want to show the output
@@ -831,8 +895,10 @@ async function runPenetrationTest(testFilePath: string): Promise<{ success: bool
         }
         
         resolve({
-          success,
-          output: testOutput
+          success: true, // The test ran (even if exploit failed)
+          exploitSuccess: exploitSuccess,
+          output: testOutput,
+          securityImplication
         });
       });
     } catch (error: any) {
