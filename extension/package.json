@@ -1,16 +1,41 @@
 {
-  "name": "testsidebarextension",
-  "displayName": "Test Sidebar Extension",
-  "description": "A sidebar extension example with simple interactive elements",
-  "version": "0.0.1",
+  "name": "codegene",
+  "displayName": "CodeGene: Smart Contract Audit & Testing",
+  "description": "AI-powered smart contract security auditing and penetration testing for Solidity and Rust",
+  "version": "0.1.0",
+  "publisher": "YourPublisherName",
   "engines": {
     "vscode": "^1.99.0"
   },
   "categories": [
+    "Security",
+    "Testing",
     "Other"
   ],
+  "keywords": [
+    "smart contract",
+    "security",
+    "audit",
+    "solidity",
+    "blockchain",
+    "penetration testing",
+    "defi",
+    "ethereum",
+    "vulnerability"
+  ],
+  "icon": "media/codegene-icon.png",
+  "galleryBanner": {
+    "color": "#1E293B",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YourUsername/codegene"
+  },
   "activationEvents": [
-    "onView:mySidebar"
+    "onView:mySidebar",
+    "workspaceContains:**/*.sol",
+    "workspaceContains:**/*.rs"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -18,7 +43,7 @@
       "activitybar": [
         {
           "id": "mySidebarContainer",
-          "title": "Example Sidebar",
+          "title": "CodeGene Audit and Testing",
           "icon": "media/icon.png"
         }
       ]
@@ -28,54 +53,54 @@
         {
           "type": "webview",
           "id": "mySidebar",
-          "name": "Interactive Panel"
+          "name": "Security Analyzer"
         }
       ]
     },
     "commands": [
       {
         "command": "testsidebarextension.helloWorld",
-        "title": "Hello World"
+        "title": "CodeGene: Hello World"
       },
       {
         "command": "testsidebarextension.saveText",
-        "title": "Save Text"
+        "title": "CodeGene: Save Text"
       },
       {
         "command": "testsidebarextension.clearHistory",
-        "title": "Clear History"
+        "title": "CodeGene: Clear History"
       },
       {
         "command": "testsidebarextension.analyzeContract",
-        "title": "Analyze Contract"
+        "title": "CodeGene: Analyze Contract"
       },
       {
         "command": "testsidebarextension.analyzeContractFromExplorer",
-        "title": "Analyze Smart Contract"
+        "title": "CodeGene: Analyze Smart Contract"
       },
       {
         "command": "testsidebarextension.analyzeAllContracts",
-        "title": "Analyze All Hardhat Contracts"
+        "title": "CodeGene: Analyze All Hardhat Contracts"
       },
       {
         "command": "testsidebarextension.startNodeAndDeploy",
-        "title": "Start Hardhat Node and Deploy Contracts"
+        "title": "CodeGene: Start Hardhat Node and Deploy Contracts"
       },
       {
         "command": "testsidebarextension.stopNode",
-        "title": "Stop Hardhat Node"
+        "title": "CodeGene: Stop Hardhat Node"
       },
       {
         "command": "testsidebarextension.getContractInfo",
-        "title": "Get Deployed Contract Info"
+        "title": "CodeGene: Get Deployed Contract Info"
       },
       {
         "command": "testsidebarextension.getAccountInfo",
-        "title": "Get Hardhat Account Info"
+        "title": "CodeGene: Get Hardhat Account Info"
       },
       {
         "command": "testsidebarextension.generatePenetrationTest",
-        "title": "Generate Smart Contract Penetration Test"
+        "title": "CodeGene: Generate Smart Contract Penetration Test"
       }
     ],
     "menus": {
@@ -109,7 +134,9 @@
     "lint": "eslint src",
     "test": "vscode-test",
     "build:tailwind": "npx tailwindcss -i ./src/webview/styles.css -o ./media/tailwind.css --minify",
-    "dev": "concurrently \"npm run watch\" \"npm run watch:tailwind\""
+    "dev": "concurrently \"npm run watch\" \"npm run watch:tailwind\"",
+    "package": "vsce package",
+    "publish": "vsce publish"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
@@ -120,6 +147,7 @@
     "@typescript-eslint/parser": "^8.28.0",
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.4.1",
+    "@vscode/vsce": "^2.32.0",
     "concurrently": "^9.1.2",
     "css-loader": "^7.1.2",
     "eslint": "^9.23.0",

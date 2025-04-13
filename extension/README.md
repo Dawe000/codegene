@@ -1,71 +1,87 @@
-# testsidebarextension README
+# CodeGene: AI-Powered Smart Contract Security
 
-This is the README for your extension "testsidebarextension". After writing up a brief description, we recommend including the following sections.
+## 🛡️ Smart Contract Auditing and Penetration Testing
 
-## Features
+CodeGene brings AI-powered security analysis directly into your development workflow, automatically identifying vulnerabilities and generating targeted penetration tests for Solidity and Rust smart contracts.
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+## ✨ How It Works
 
-For example if there is an image subfolder under your extension project workspace:
+CodeGene seamlessly integrates with your development environment to provide:
 
-\!\[feature X\]\(images/feature-x.png\)
+1. **Automated Security Analysis**: Scan your smart contracts to identify potential vulnerabilities
+2. **Dynamic Penetration Test Generation**: Create targeted tests to verify exploitability
+3. **Local Blockchain Testing**: Run tests against deployed contracts in a controlled environment
+4. **Adaptive Testing Refinement**: Intelligently optimize tests based on execution results
+5. **Comprehensive Security Reports**: Get detailed findings and recommendations
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+## 🚀 Features
 
-## Requirements
+### 🔍 Smart Contract Analysis
+- Instantly scan Solidity and Rust contracts for security flaws
+- Identify high-risk vulnerabilities including reentrancy, overflow/underflow, access control issues
+- Receive detailed vulnerability explanations with severity classifications
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+### 🧪 Penetration Test Generation
+- Generate specialized test scripts for detected vulnerabilities
+- Test scripts use Hardhat and work out-of-the-box with your project
+- No need to write complex test logic or understand exploit mechanics
 
-## Extension Settings
+### ⚙️ Local Testing Environment
+- Launch a local Hardhat node with a single click
+- Automatically deploy your contracts for testing
+- Simulate real-world interactions in a controlled environment
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+### 🔄 Adaptive Test Refinement
+- Tests automatically refine based on execution results
+- Multiple testing strategies applied for thorough coverage
+- Smart failure analysis to distinguish between secure contracts and test implementation issues
 
-For example:
+### 📊 Security Reporting
+- Visual dashboard showing vulnerability status
+- Test execution results with detailed output
+- Exportable security reports for documentation and auditing
 
-This extension contributes the following settings:
+## 📖 Usage Guide
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+### Analyzing Contracts
 
-## Known Issues
+1. Open any Solidity (.sol) or Rust (.rs) file
+2. Right-click in the editor and select "CodeGene: Analyze Smart Contract"
+3. View the analysis results in the CodeGene panel
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+### Creating Penetration Tests
 
-## Release Notes
+1. After analysis, review the detected vulnerabilities
+2. Click "Test Vulnerabilities" to generate tests for all findings
+3. Alternatively, select specific vulnerabilities to test individually
 
-Users appreciate release notes as you update your extension.
+### Running Tests
 
-### 1.0.0
+1. Use the "Start Hardhat Node" button to launch a local blockchain
+2. Tests run automatically against your deployed contracts
+3. Review results showing whether exploits succeeded or failed
 
-Initial release of ...
+### Reviewing Security Status
 
-### 1.0.1
+- Green indicators show secure contracts that resisted exploitation
+- Red indicators show successfully exploited vulnerabilities
+- Yellow indicators highlight potential issues needing further investigation
 
-Fixed issue #.
+## 📷 Screenshots
 
-### 1.1.0
+![Contract Analysis](media/screenshot-analysis.png)
+![Penetration Testing](media/screenshot-testing.png)
+![Security Report](media/screenshot-report.png)
 
-Added features X, Y, and Z.
+## 💡 Supported Vulnerability Types
+
+- Reentrancy vulnerabilities
+- Access control issues
+- Integer overflow/underflow
+- Front-running opportunities
+- Logic errors and business logic flaws
+- And many more...
 
 ---
 
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+Made with ❤️ for blockchain developers and security researchers

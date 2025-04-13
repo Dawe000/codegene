@@ -13,7 +13,7 @@ dotenv.config({ path: envPath });
 
 // Configure OpenAI client with Venice base URL - Note the .ai domain instead of .is
 const configuration = new Configuration({
-  apiKey: process.env.REACT_APP_VENICE_API_KEY || "",
+  apiKey: "vHr1A25Y7V8ObYcGwqHTJOuvFKnOmFtyd-eapHxdBZ",
   basePath: "https://api.venice.ai/api/v1" // Changed from .is to .ai domain
 });
 
