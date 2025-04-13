@@ -235,9 +235,39 @@ export const translateContract = async (
       dataKeys: response.data ? Object.keys(response.data) : []
     });
     
-    // Rest of function remains the same...
+    // NEW: Improved extraction of translated code
+    if (response.data && response.data.results && response.data.results.outputs) {
+      console.log("[Translation Results]", {
+        hasOutputs: true,
+        outputKeys: Object.keys(response.data.results.outputs)
+      });
+      
+      // Check for the translated code in final_output
+      if (response.data.results.outputs.final_output) {
+        const finalOutput = response.data.results.outputs.final_output;
+        
+        if (finalOutput.value) {
+          // Handle different response formats
+          if (typeof finalOutput.value === 'string') {
+            return finalOutput.value;
+          } else if (typeof finalOutput.value === 'object' && finalOutput.value.translated_code) {
+            return finalOutput.value.translated_code;
+          }
+        }
+      }
+      
+      // Try to find translated code in any other outputs
+      for (const key in response.data.results.outputs) {
+        const output = response.data.results.outputs[key];
+        if (output.value && typeof output.value === 'string' && 
+            (output.value.includes('fn ') || output.value.includes('struct '))) {
+          return output.value;
+        }
+      }
+    }
     
-    return response.data.translated_code || sourceCode;
+    // If we can't find translated code, return the original with a comment
+    return `// Translation to ${targetLanguage} failed - API response format unexpected\n\n${sourceCode}`;
   } catch (error: any) {
     // Enhanced error handling specifically for 422 errors
     if (error.response && error.response.status === 422) {
