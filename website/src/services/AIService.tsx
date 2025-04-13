@@ -6,13 +6,17 @@ const PORTIA_API_URL = process.env.REACT_APP_PORTIA_API_URL || 'https://portia-f
 
 // Helper function to construct proper URLs
 const constructUrl = (endpoint: string): string => {
-  // Make sure endpoint starts with a slash
-  const formattedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  // Make sure endpoint starts with a slash AND trim any whitespace
+  const formattedEndpoint = endpoint.trim();
+  const endpointWithSlash = formattedEndpoint.startsWith('/') ? formattedEndpoint : `/${formattedEndpoint}`;
   
-  // Make sure base URL doesn't end with a slash
-  const baseUrl = PORTIA_API_URL.endsWith('/') ? PORTIA_API_URL.slice(0, -1) : PORTIA_API_URL;
+  // Make sure base URL doesn't end with a slash AND trim any whitespace
+  const trimmedBaseUrl = PORTIA_API_URL.trim();
+  const baseUrl = trimmedBaseUrl.endsWith('/') ? trimmedBaseUrl.slice(0, -1) : trimmedBaseUrl;
   
-  return `${baseUrl}${formattedEndpoint}`;
+  const url = `${baseUrl}${endpointWithSlash}`;
+  console.log(`[URL Debug] Constructed URL: ${url}`);
+  return url;
 };
 
 // Enhanced logging function
@@ -198,17 +202,27 @@ export const translateContract = async (
   targetLanguage: string
 ): Promise<string> => {
   const endpoint = '/translate-contract';
-  const url = logApiRequest(endpoint, { codeLength: sourceCode.length, targetLanguage });
   
   try {
-    console.log(`Translating to ${targetLanguage}, code length: ${sourceCode.length}`);
+    // Debug URL construction
+    console.log(`[URL Construction Debug] Target language: ${targetLanguage}`);
+    console.log(`[URL Construction Debug] PORTIA_API_URL: ${PORTIA_API_URL}`);
+    
+    const url = constructUrl(endpoint);
+    logApiRequest(endpoint, { codeLength: sourceCode.length, targetLanguage });
+    
+    console.log(`[URL Final] Using URL: ${url}`);
     
     const response = await axios.post(url, {
-      source_code: sourceCode,
+      contract_code: sourceCode,  // Note: changed from source_code to match API expectation
       target_language: targetLanguage
     });
     
-    console.log("Received response:", response.data);
+    console.log("[Translate API Response]", {
+      status: response.status,
+      hasData: !!response.data,
+      dataKeys: response.data ? Object.keys(response.data) : []
+    });
     
     // Check if we got a valid response with the right structure
     if (response.data && response.data.results && response.data.results.outputs && 
