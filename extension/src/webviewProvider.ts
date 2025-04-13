@@ -100,4 +100,48 @@ export class SidebarWebViewProvider implements vscode.WebviewViewProvider {
       </html>
     `;
   }
+
+  /**
+   * Updates the webview with penetration test results
+   * @param testResults Array of test results to display
+   */
+  public updateTestResults(testResults: any[]) {
+    if (!this.webview) {
+      console.error("Cannot update results: webview not initialized");
+      return;
+    }
+    
+    console.log(`Sending ${testResults.length} test results to webview`);
+    
+    this.webview.postMessage({
+      command: 'displayMultiplePenetrationTestResults',
+      testResults: testResults.map(test => ({
+        vulnerability: test.vulnerability,
+        success: test.success,
+        exploitSuccess: test.exploitSuccess,
+        output: test.output,
+        securityImplication: test.securityImplication,
+        filePath: test.filePath,
+        failureAnalysis: test.failureAnalysis
+      }))
+    });
+  }
+  
+  /**
+   * Updates the webview with a single penetration test result
+   * @param testResult Result of a single test
+   */
+  public updateSingleTestResult(testResult: any) {
+    if (!this.webview) {
+      console.error("Cannot update result: webview not initialized");
+      return;
+    }
+    
+    console.log("Sending single test result to webview");
+    
+    this.webview.postMessage({
+      command: 'displayPenetrationTestResult',
+      ...testResult
+    });
+  }
 }
