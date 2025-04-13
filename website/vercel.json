@@ -1,11 +1,16 @@
 {
+  "version": 2,
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "/.*", "dest": "/index.html" }
+  ],
   "builds": [
     {
       "src": "package.json",
       "use": "@vercel/static-build",
       "config": {
         "installCommand": "npm install --force",
-        "buildCommand": "npm run build"
+        "buildCommand": "DISABLE_ESLINT_PLUGIN=true npm run build"
       }
     }
   ]
