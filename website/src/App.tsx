@@ -1,5 +1,5 @@
 // src/App.tsx
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Container, CssBaseline, ThemeProvider, createTheme } from '@mui/material';
 import { Web3ReactProvider } from '@web3-react/core';
 import { ethers } from 'ethers';
@@ -36,6 +36,15 @@ const darkTheme = createTheme({
 });
 
 function App() {
+  useEffect(() => {
+    console.log("[Environment Check]", {
+      nodeEnv: process.env.NODE_ENV,
+      apiUrl: process.env.REACT_APP_PORTIA_API_URL || 'using default',
+      publicUrl: process.env.PUBLIC_URL,
+      baseUrl: window.location.origin
+    });
+  }, []);
+
   return (
     <Web3ReactProvider getLibrary={getLibrary}>
       <Web3Provider>

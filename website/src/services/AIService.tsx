@@ -4,10 +4,54 @@ import axios from "axios";
 // Base URL for Portia API
 const PORTIA_API_URL = process.env.REACT_APP_PORTIA_API_URL || 'https://portia-finetune-1.onrender.com';
 
+// Enhanced logging function
+const logApiRequest = (endpoint: string, data: any) => {
+  console.log(`[API Request] ${endpoint}`, {
+    url: `${PORTIA_API_URL}${endpoint}`,
+    environment: process.env.NODE_ENV,
+    apiUrl: PORTIA_API_URL,
+    dataSize: JSON.stringify(data).length,
+    timestamp: new Date().toISOString()
+  });
+};
+
+// Enhanced error logging function
+const logApiError = (endpoint: string, error: any) => {
+  console.error(`[API Error] ${endpoint}`, {
+    url: `${PORTIA_API_URL}${endpoint}`,
+    environment: process.env.NODE_ENV,
+    apiUrl: PORTIA_API_URL,
+    error: {
+      message: error.message,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      responseData: error.response?.data,
+      config: {
+        headers: error.config?.headers,
+        method: error.config?.method,
+        timeout: error.config?.timeout
+      }
+    },
+    timestamp: new Date().toISOString()
+  });
+};
+
 export const analyzeContract = async (contractCode: string): Promise<any> => {
+  const endpoint = '/analyze-contract';
+  logApiRequest(endpoint, { contractCodeLength: contractCode.length });
+  
   try {
-    const response = await axios.post(`${PORTIA_API_URL}/analyze-contract`, {
+    console.time('analyzeContract');
+    const response = await axios.post(`${PORTIA_API_URL}${endpoint}`, {
       contract_code: contractCode
+    });
+    console.timeEnd('analyzeContract');
+    
+    console.log(`[API Response] ${endpoint}`, {
+      status: response.status,
+      hasResults: !!response.data?.results,
+      hasOutputs: !!response.data?.results?.outputs,
+      hasFinalOutput: !!response.data?.results?.outputs?.final_output
     });
     
     // Extract the final analysis from Portia's response
@@ -93,7 +137,7 @@ export const analyzeContract = async (contractCode: string): Promise<any> => {
       }
     };
   } catch (error: any) {
-    console.error('Error calling Portia API:', error);
+    logApiError(endpoint, error);
     // Return fallback analysis
     return {
       overall_score: 80,
