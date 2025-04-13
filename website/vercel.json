@@ -4,8 +4,8 @@
       "src": "package.json",
       "use": "@vercel/static-build",
       "config": {
-        "installCommand": "npm install --legacy-peer-deps",
-        "buildCommand": "react-scripts build"
+        "installCommand": "npm install --force",
+        "buildCommand": "npm run build"
       }
     }
   ]

@@ -65,6 +65,8 @@
   "resolutions": {
     "abitype": "^1.0.8",
     "typescript": "4.9.5",
-    "viem": "2.26.3"
+    "viem": "2.26.3",
+    "@walletconnect/utils/viem": "2.26.3",
+    "@walletconnect/ethereum-provider/viem": "2.26.3"
   }
 }
