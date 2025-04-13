@@ -18,13 +18,15 @@ module.exports = async (req, res) => {
   try {
     console.log(`Proxying request to: ${portiaApiUrl}${endpoint}`);
     
+    // Increase timeout significantly for AI inference
     const response = await axios({
       method: req.method,
       url: `${portiaApiUrl}${endpoint}`,
       data: req.body,
       headers: {
         'Content-Type': 'application/json'
-      }
+      },
+      timeout: 45000 // 45 seconds timeout for AI inference
     });
     
     res.status(response.status).json(response.data);
