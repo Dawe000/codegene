@@ -28,6 +28,7 @@
     "react-markdown": "^10.1.0",
     "react-scripts": "5.0.1",
     "react-syntax-highlighter": "^15.6.1",
+    "recharts": "^2.15.2",
     "typescript": "^4.9.5",
     "viem": "^2.26.3",
     "wagmi": "^2.14.16",

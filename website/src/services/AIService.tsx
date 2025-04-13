@@ -2,7 +2,7 @@
 import axios from "axios";
 
 // Base URL for Portia API
-const PORTIA_API_URL = 'http://localhost:8000';
+const PORTIA_API_URL = process.env.REACT_APP_PORTIA_API_URL || 'https://portia-finetune-1.onrender.com';
 
 export const analyzeContract = async (contractCode: string): Promise<any> => {
   try {

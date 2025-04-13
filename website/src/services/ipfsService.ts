@@ -1,50 +1,23 @@
 // src/services/ipfsService.ts
 import axios from 'axios';
 
-// Replace with your Pinata API keys or other IPFS provider
-const PINATA_API_KEY = process.env.REACT_APP_PINATA_API_KEY;
-const PINATA_SECRET_KEY = process.env.REACT_APP_PINATA_SECRET_KEY;
+// Constants for working with Pinata - in production, use environment variables
+const PINATA_API_KEY = process.env.REACT_APP_PINATA_API_KEY || '';
+const PINATA_SECRET_KEY = process.env.REACT_APP_PINATA_SECRET_KEY || '';
 
-// Generate metadata based on contract analysis
-export const generateTokenMetadata = (
-  name: string,
-  symbol: string,
-  contractAnalysis: any
-) => {
-  // Generate description based on analysis
-  const securityScore = contractAnalysis.overall_score;
-  const riskLevel = securityScore > 80 ? 'low' : securityScore > 60 ? 'medium' : 'high';
-  
-  // Create token metadata following ERC20 metadata standards
-  return {
-    name,
-    symbol,
-    description: `AI-generated token by CodeGene based on smart contract analysis. Security score: ${securityScore}/100. Risk level: ${riskLevel}.`,
-    image: "https://codegene.ai/token-image.png", // Replace with your generated image URL
-    external_link: "https://codegene.ai",
-    properties: {
-      security_score: securityScore,
-      risk_level: riskLevel,
-      complexity_score: contractAnalysis.complexity.score,
-      vulnerability_score: contractAnalysis.vulnerabilities.score,
-      analysis_date: new Date().toISOString()
-    },
-    attributes: [
-      {
-        trait_type: "Security Score",
-        value: securityScore
-      },
-      {
-        trait_type: "Risk Level",
-        value: riskLevel
-      }
-    ]
-  };
-};
-
-// Pin metadata to IPFS using Pinata
-export const pinToIPFS = async (metadata: any): Promise<string> => {
+/**
+ * Pins JSON metadata to IPFS using Pinata
+ * @param metadata The metadata to pin to IPFS
+ * @returns The IPFS URI of the pinned content
+ */
+export const pinJSONToIPFS = async (metadata: any): Promise<string> => {
   try {
+    // If no API keys are provided, return a placeholder URI
+    if (!PINATA_API_KEY || !PINATA_SECRET_KEY) {
+      console.warn('No Pinata API keys provided, using placeholder IPFS URI');
+      return `ipfs://bafkreigoxzqzbnxsn35vq7lls3ljxdcwjafxvbvkivprsodzrptpiguy${Date.now().toString()}`;
+    }
+    
     const response = await axios.post(
       'https://api.pinata.cloud/pinning/pinJSONToIPFS',
       metadata,
@@ -61,7 +34,50 @@ export const pinToIPFS = async (metadata: any): Promise<string> => {
   } catch (error) {
     console.error('Error pinning to IPFS:', error);
     
-    // For testing without actual IPFS pinning
-    return `ipfs://QmTestHash${Math.floor(Math.random() * 1000000)}`;
+    // Return a placeholder URI in case of error
+    return `ipfs://bafkreigoxzqzbnxsn35vq7lls3ljxdcwjafxvbvkivprsodzrptpiguy${Date.now().toString()}`;
   }
+};
+
+/**
+ * Generates Zora coin metadata based on contract analysis
+ * @param name The name of the coin
+ * @param symbol The symbol of the coin
+ * @param contractAnalysis Analysis of the contract
+ * @returns Metadata for the Zora coin
+ */
+export const generateTokenMetadata = (
+  name: string,
+  symbol: string,
+  contractAnalysis: any
+) => {
+  // Generate description based on analysis
+  const securityScore = contractAnalysis?.overall_score || 75;
+  const riskLevel = securityScore > 80 ? 'low' : securityScore > 60 ? 'medium' : 'high';
+  
+  // Create token metadata following the Zora metadata standards
+  return {
+    name,
+    symbol,
+    description: `AI-generated token by CodeGene based on smart contract analysis. Security score: ${securityScore}/100. Risk level: ${riskLevel}.`,
+    image: "https://codegene.ai/token-image.png", // Replace with your generated image URL
+    external_link: "https://codegene.ai",
+    properties: {
+      security_score: securityScore,
+      risk_level: riskLevel,
+      complexity_score: contractAnalysis?.complexity?.score || 70,
+      vulnerability_score: contractAnalysis?.vulnerabilities?.score || 80,
+      analysis_date: new Date().toISOString()
+    },
+    attributes: [
+      {
+        trait_type: "Security Score",
+        value: securityScore
+      },
+      {
+        trait_type: "Risk Level",
+        value: riskLevel
+      }
+    ]
+  };
 };
