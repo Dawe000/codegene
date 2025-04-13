@@ -5,9 +5,20 @@ import * as os from 'os';
 import { spawn } from 'child_process';
 import { SidebarWebViewProvider } from './webviewProvider';
 import { getSolAndRustFileNames, getGroupedFileNames } from './fileNameUtils';
-import { analyzeTestFailure, analyzeContract, generatePenetrationTest, generateMultiplePenetrationTests, adaptPenetrationTest, generateSecurityReport } from './veniceService';
+import { 
+  analyzeTestFailure, 
+  analyzeContract, 
+  generatePenetrationTest, 
+  generateMultiplePenetrationTests, 
+  adaptPenetrationTest, 
+  generateSecurityReport, 
+  runAndRefineTestUntilSuccess, 
+  runMultipleTestsInParallel,
+  extractVulnerabilityFromFilename
+} from './veniceService';
 import * as fileUtils from './fileUtils';
 import * as hardhatService from './hardhatService';
+import { ChatCompletionRequestWithVenice } from './types';
 
 // Create a dedicated output channel
 let outputChannel: vscode.OutputChannel;
@@ -712,6 +723,158 @@ export function activate(context: vscode.ExtensionContext) {
       } catch (error: any) {
         vscode.window.showErrorMessage(`Error generating security report: ${error.message}`);
       }
+    }),
+
+    // Run and refine penetration test command
+    vscode.commands.registerCommand('venice.runAndRefineTest', async () => {
+      try {
+        // Get the active editor
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+          vscode.window.showErrorMessage("No active editor found");
+          return;
+        }
+        
+        // Check if this is a test file
+        const filePath = editor.document.uri.fsPath;
+        if (!filePath.includes('test') || !filePath.endsWith('.ts')) {
+          vscode.window.showErrorMessage("Please select a TypeScript test file");
+          return;
+        }
+        
+        // Get the contract name and code (you'll need to implement this)
+        const { contractCode, contractName } = await getContractFromTest(filePath);
+        
+        // Create a progress notification
+        vscode.window.withProgress({
+          location: vscode.ProgressLocation.Notification,
+          title: "Running and refining penetration test",
+          cancellable: true
+        }, async (progress, token) => {
+          
+          // Show initial progress
+          progress.report({ increment: 0, message: "Starting test..." });
+          
+          const result = await runAndRefineTestUntilSuccess(
+            contractCode,
+            contractName,
+            filePath,
+            5 // Increased from 3 to 5
+          );
+          
+          if (result.success) {
+            if (result.exploitSuccess) {
+              vscode.window.showInformationMessage(
+                `✅ Vulnerability successfully exploited after ${result.cycles} cycles!`,
+                "View Test"
+              ).then(selection => {
+                if (selection === "View Test") {
+                  vscode.workspace.openTextDocument(result.finalTestPath!)
+                    .then(doc => vscode.window.showTextDocument(doc));
+                }
+              });
+            } else {
+              vscode.window.showInformationMessage(
+                `Contract appears secure after ${result.cycles} test cycles: ${result.securityImplication}`,
+                "View Analysis"
+              );
+            }
+          } else {
+            vscode.window.showErrorMessage(`Error in test refinement: ${result.output}`);
+          }
+          
+          return result;
+        });
+        
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`Error: ${error.message}`);
+      }
+    }),
+
+    vscode.commands.registerCommand('venice.updateTestStatus', (status) => {
+      if (provider && provider.webview) {
+        provider.webview.postMessage({
+          command: 'updateTestStatus',
+          ...status
+        });
+      }
+    }),
+
+    // Add this new command to your extension.ts
+    vscode.commands.registerCommand('venice.runMultipleTests', async () => {
+      try {
+        // Get all penetration test files
+        const workspacePath = fileUtils.getWorkspacePath();
+        if (!workspacePath) {
+          vscode.window.showErrorMessage("No workspace folder open");
+          return;
+        }
+        
+        const testDir = path.join(workspacePath, 'test');
+        if (!fs.existsSync(testDir)) {
+          vscode.window.showErrorMessage("Test directory not found");
+          return;
+        }
+        
+        // Find all penetration test files
+        const testFiles = fs.readdirSync(testDir)
+          .filter(file => file.includes('PenetrationTest') && file.endsWith('.ts'))
+          .map(file => path.join(testDir, file));
+        
+        if (testFiles.length === 0) {
+          vscode.window.showInformationMessage("No penetration test files found");
+          return;
+        }
+        
+        // Get the contract code
+        const contractCode = fs.existsSync(TEMP_FILE_PATH) 
+          ? fs.readFileSync(TEMP_FILE_PATH, 'utf8')
+          : "";
+        
+        if (!contractCode) {
+          vscode.window.showErrorMessage("No contract code found. Please analyze a contract first.");
+          return;
+        }
+        
+        // Extract contract name from the code
+        const contractNameMatch = contractCode.match(/contract\s+(\w+)\s*{/);
+        const contractName = contractNameMatch ? contractNameMatch[1] : "Contract";
+        
+        // Show progress indicator
+        vscode.window.withProgress({
+          location: vscode.ProgressLocation.Notification,
+          title: `Running ${testFiles.length} penetration tests in parallel`,
+          cancellable: false
+        }, async (progress) => {
+          // Run the tests in parallel
+          const results = await runMultipleTestsInParallel(
+            contractCode,
+            contractName,
+            testFiles
+          );
+          
+          // Update the UI with results
+          if (provider && provider.webview) {
+            provider.webview.postMessage({
+              command: 'displayMultiplePenetrationTestResults',
+              results: results.results.map(result => ({
+                vulnerability: extractVulnerabilityFromFilename(result.originalTestPath),
+                filePath: result.finalTestPath || result.originalTestPath,
+                exploitSuccess: result.exploitSuccess || false,
+                output: result.output || '',
+                securityImplication: result.securityImplication,
+                cycles: result.cycles,
+                maxCycles: 5
+              }))
+            });
+          }
+          
+          return results;
+        });
+        
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`Error running tests: ${error.message}`);
+      }
     })
   );
   
@@ -1085,6 +1248,78 @@ async function runPenetrationTest(testFilePath: string): Promise<{
                 vulnerabilityType || 'Unknown'
               );
               
+              // NEW: Automatically refine the test if it failed due to technical issues
+              if (failureAnalysis && !failureAnalysis.isSecure) {
+                outputChannel.appendLine("\n🔄 Test failed due to technical issues. Automatically refining test...");
+                
+                // Extract contract name
+                const contractNameMatch = contractCode.match(/contract\s+(\w+)\s*{/);
+                const contractName = contractNameMatch ? contractNameMatch[1] : 'HardhatContracts';
+                
+                // Show notification to user
+                vscode.window.showInformationMessage(
+                  "Test failed due to technical issues. Automatically refining...",
+                  "View Progress"
+                ).then(selection => {
+                  if (selection === "View Progress") {
+                    outputChannel.show();
+                  }
+                });
+                
+                // Start the auto-refinement process
+                const refinementResult = await runAndRefineTestUntilSuccess(
+                  contractCode,
+                  contractName,
+                  testFilePath,
+                  5  // Increased from 3 to 5
+                );
+                
+                if (refinementResult.success && refinementResult.exploitSuccess) {
+                  vscode.window.showWarningMessage(
+                    `⚠️ Vulnerability successfully exploited after auto-refinement!`,
+                    "View Final Test"
+                  ).then(selection => {
+                    if (selection === "View Final Test") {
+                      vscode.workspace.openTextDocument(refinementResult.finalTestPath!)
+                        .then(doc => vscode.window.showTextDocument(doc));
+                    }
+                  });
+                  
+                  // NEW CODE: Update webview with refined test results
+                  if (provider && provider.webview) {
+                    // First update the original test result to show it's been refined
+                    provider.webview.postMessage({
+                      command: 'updateTestRefinementStatus',
+                      originalTestPath: testFilePath,
+                      status: 'refined'
+                    });
+                    
+                    // Then send the new test result as an adaptation
+                    provider.webview.postMessage({
+                      command: 'displayAdaptedPenetrationTestResult',
+                      attemptNumber: refinementResult.cycles,
+                      success: true,
+                      exploitSuccess: true,
+                      output: refinementResult.output || '',
+                      filePath: refinementResult.finalTestPath || '',
+                      securityImplication: `Auto-refinement succeeded after ${refinementResult.cycles} cycles: ${refinementResult.securityImplication || 'Vulnerability confirmed'}`,
+                      previousFilePath: testFilePath,
+                      isAutoRefined: true // Flag to identify auto-refined tests
+                    });
+                  }
+                  
+                  // Update the result with the refined test information
+                  resolve({
+                    success: true,
+                    exploitSuccess: true,
+                    output: refinementResult.output || testOutput,
+                    securityImplication: `Vulnerability confirmed after auto-refinement: ${refinementResult.securityImplication}`,
+                    failureAnalysis
+                  });
+                  return; // Early return to avoid resolving the promise twice
+                }
+              }
+              
               outputChannel.appendLine(`\nFailure analysis: ${failureAnalysis.isSecure ? 'CONTRACT IS SECURE' : 'TEST HAS ISSUES'}`);
               outputChannel.appendLine(`Type: ${failureAnalysis.failureType}`);
               outputChannel.appendLine(`Explanation: ${failureAnalysis.explanation}`);
@@ -1201,6 +1436,90 @@ async function ensureTestDependencies(): Promise<boolean> {
   } catch (error: any) {
     outputChannel.appendLine(`Error ensuring test dependencies: ${error.message}`);
     return false;
+  }
+}
+
+/**
+ * Extracts contract information from a test file
+ * 
+ * @param testFilePath Path to the test file
+ * @returns Contract code and name
+ */
+async function getContractFromTest(testFilePath: string): Promise<{contractCode: string; contractName: string}> {
+  try {
+    // Read the test file
+    const testContent = fs.readFileSync(testFilePath, 'utf8');
+    
+    // Try to extract contract name from the test file
+    let contractName = 'Unknown';
+    
+    // Look for contract factory pattern
+    const factoryMatch = testContent.match(/getContractFactory\(['"]([\w]+)['"]\)/);
+    if (factoryMatch && factoryMatch[1]) {
+      contractName = factoryMatch[1];
+      console.log(`Extracted contract name from test: ${contractName}`);
+    } else {
+      // Look for describe block title which might contain contract name
+      const describeMatch = testContent.match(/describe\(['"](.*?)['"]/);
+      if (describeMatch && describeMatch[1]) {
+        // Extract what looks like a contract name
+        const possibleName = describeMatch[1].match(/(\w+)\s+(?:Contract|Test|Vulnerability)/i);
+        if (possibleName && possibleName[1]) {
+          contractName = possibleName[1];
+          console.log(`Extracted contract name from describe block: ${contractName}`);
+        }
+      }
+    }
+
+    // Try to get contract code
+    // First check if we have it in the global variable or temp file
+    let contractCode = '';
+    
+    if (fs.existsSync(TEMP_FILE_PATH)) {
+      contractCode = fs.readFileSync(TEMP_FILE_PATH, 'utf8');
+      console.log(`Loaded ${contractCode.length} characters from temp file`);
+    } else if (lastAnalyzedCode && lastAnalyzedCode.length > 0) {
+      contractCode = lastAnalyzedCode;
+      console.log(`Using ${contractCode.length} characters from lastAnalyzedCode`);
+    } else {
+      // Try to find the contract file in the workspace
+      const workspacePath = fileUtils.getWorkspacePath();
+      if (workspacePath) {
+        // Look in contracts directory (Hardhat standard)
+        const contractsDir = path.join(workspacePath, 'contracts');
+        if (fs.existsSync(contractsDir)) {
+          // Look for a file with the contract name
+          const contractFile = path.join(contractsDir, `${contractName}.sol`);
+          if (fs.existsSync(contractFile)) {
+            contractCode = fs.readFileSync(contractFile, 'utf8');
+            console.log(`Found contract file at ${contractFile}`);
+          } else {
+            // If not found by name, search all .sol files
+            const solFiles = await fileUtils.findHardhatContracts();
+            for (const file of solFiles) {
+              const content = fs.readFileSync(file.path, 'utf8');
+              if (content.includes(`contract ${contractName}`)) {
+                contractCode = content;
+                console.log(`Found contract in ${file.path}`);
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    if (!contractCode) {
+      throw new Error(`Could not find contract code for ${contractName}`);
+    }
+    
+    return {
+      contractCode,
+      contractName
+    };
+  } catch (error: any) {
+    console.error('Error extracting contract from test:', error);
+    throw new Error(`Failed to extract contract information: ${error.message}`);
   }
 }
 
