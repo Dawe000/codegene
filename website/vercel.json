@@ -13,5 +13,8 @@
         "buildCommand": "DISABLE_ESLINT_PLUGIN=true npm run build"
       }
     }
+  ],
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
