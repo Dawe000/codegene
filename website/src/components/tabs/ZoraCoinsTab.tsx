@@ -13,7 +13,8 @@ import AnalyticsIcon from '@mui/icons-material/Analytics';
 import LaunchIcon from '@mui/icons-material/Launch';
 import { useWeb3 } from '../../contexts/Web3Context';
 import { analyzeContract } from '../../services/AIService';
-import { createZoraCoin } from '../../services/zoraService';
+import { createZoraCoin, generatePlaceholderUri } from '../../services/zoraService';
+import { generateTokenMetadata, pinJSONToIPFS } from '../../services/ipfsService';
 import Grid from '../GridWrapper'; // Import our Grid wrapper
 
 // Steps for the coin creation process
@@ -49,7 +50,7 @@ const ZoraCoinsTab: React.FC = () => {
   // Check if we're on Base network
   const isBaseNetwork = chainId === 8453; // Base Mainnet
   const isBaseSepoliaNetwork = chainId === 84532; // Base Sepolia testnet
-  const isOnBaseNetwork = isBaseNetwork || isBaseSepoliaNetwork;
+  const isOnBaseNetwork = isBaseNetwork //|| isBaseSepoliaNetwork;
   
   // Handle switching to Base Sepolia
   const handleSwitchNetwork = async () => {
@@ -84,8 +85,8 @@ const ZoraCoinsTab: React.FC = () => {
                   symbol: 'ETH',
                   decimals: 18,
                 },
-                rpcUrls: ['https://sepolia.base.org'],
-                blockExplorerUrls: ['https://sepolia.basescan.org'],
+                rpcUrls: ['https://mainnet.base.org'],
+                blockExplorerUrls: ['https://base.blockscout.com/'],
               },
             ],
           });
@@ -168,15 +169,34 @@ const ZoraCoinsTab: React.FC = () => {
     setSuccess('');
     
     try {
-      // Use a placeholder URI for testing
-      const uri = `ipfs://placeholder-for-${coinSymbol.toLowerCase()}`;
+      // Generate metadata for the token
+      const metadata = generateTokenMetadata(coinName, coinSymbol, analysis);
       
+      // Pin the metadata to IPFS (if you have Pinata API keys set up)
+      let uri;
+      try {
+        uri = await pinJSONToIPFS(metadata);
+      } catch (ipfsError) {
+        console.error('Error pinning to IPFS, using placeholder:', ipfsError);
+        uri = generatePlaceholderUri(coinSymbol);
+      }
+      
+      console.log('Token metadata URI:', uri);
+      
+      // Get the RPC URL for the current network
+      const rpcUrl = isBaseNetwork ? 
+      'https://mainnet.base.org':
+       'https://sepolia.base.org';
+        
+      
+      // Create the Zora coin
       const result = await createZoraCoin(
         account,
-        'https://sepolia.base.org',
+        rpcUrl,
         coinName,
         coinSymbol,
-        uri 
+        uri,
+        '0.0' // Small initial purchase of 0.01 ETH to create liquidity
       );
       
       setCreatedToken({
@@ -509,7 +529,8 @@ const ZoraCoinsTab: React.FC = () => {
                     1. Add to Wallet
                   </Typography>
                   <Typography variant="body2">
-                    Add your token to MetaMask or another wallet to track your balance.
+                    Add your token to MetaMask or another wallet to track your balance. 
+                    Use the token address above.
                   </Typography>
                 </CardContent>
               </Card>
@@ -522,7 +543,7 @@ const ZoraCoinsTab: React.FC = () => {
                     2. Distribute Tokens
                   </Typography>
                   <Typography variant="body2">
-                    Send tokens to your community, team members, or other stakeholders.
+                    Go to the "Distribute" tab to send tokens to your community, team members, or other stakeholders.
                   </Typography>
                 </CardContent>
               </Card>
@@ -535,7 +556,7 @@ const ZoraCoinsTab: React.FC = () => {
                     3. Add Liquidity
                   </Typography>
                   <Typography variant="body2">
-                    Add liquidity to enable trading of your token on Zora.
+                    Visit the Zora website to add more liquidity and enable trading of your token.
                   </Typography>
                 </CardContent>
               </Card>

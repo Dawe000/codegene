@@ -7,14 +7,41 @@ import {
 } from '@mui/material';
 import { useWeb3 } from '../../contexts/Web3Context';
 import Grid from '../GridWrapper'; // Import our Grid wrapper component
+import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 
-// Sample distribution data
+// Distribution data with colors for visualization
 const distributionData = [
-  { name: 'Team', value: 20 },
-  { name: 'Community', value: 40 },
-  { name: 'Treasury', value: 20 },
-  { name: 'Liquidity', value: 20 }
+  { name: 'Team', value: 20, color: '#8884d8' },
+  { name: 'Community', value: 40, color: '#82ca9d' },
+  { name: 'Treasury', value: 20, color: '#ffc658' },
+  { name: 'Liquidity', value: 20, color: '#ff8042' }
 ];
+
+// Simple Distribution Chart component
+const DistributionChart = () => (
+  <Box sx={{ width: '100%', height: 300 }}>
+    <ResponsiveContainer>
+      <PieChart>
+        <Pie
+          data={distributionData}
+          cx="50%"
+          cy="50%"
+          labelLine={false}
+          outerRadius={100}
+          innerRadius={60}
+          fill="#8884d8"
+          dataKey="value"
+          label={({ name, value }) => `${name}: ${value}%`}
+        >
+          {distributionData.map((entry, index) => (
+            <Cell key={`cell-${index}`} fill={entry.color} />
+          ))}
+        </Pie>
+      </PieChart>
+    </ResponsiveContainer>
+  </Box>
+);
+
 
 // Mock distribution service function for demonstration
 const distributeTokens = async (library: any, tokenAddress: string, recipientList: any[]) => {
@@ -140,7 +167,20 @@ const TokenDistributionTab = () => {
                   {distributionData.map((row) => (
                     <TableRow key={row.name}>
                       <TableCell component="th" scope="row">
-                        {row.name}
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <Box 
+                            component="span" 
+                            sx={{ 
+                              display: 'inline-block', 
+                              width: 12, 
+                              height: 12, 
+                              bgcolor: row.color,
+                              mr: 1,
+                              borderRadius: '50%'
+                            }} 
+                          />
+                          {row.name}
+                        </Box>
                       </TableCell>
                       <TableCell align="right">{row.value}%</TableCell>
                     </TableRow>
@@ -150,10 +190,9 @@ const TokenDistributionTab = () => {
             </TableContainer>
           </Grid>
           <Grid item xs={12} md={6}>
-            {/* Visualization placeholder - you'd implement with Recharts or similar */}
-            <Box sx={{ height: 250, width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', bgcolor: 'background.paper' }}>
-              <Typography>Distribution Chart Placeholder</Typography>
-            </Box>
+          <Box sx={{ width: '100%', height: 300 }}>
+  <DistributionChart />
+</Box>
           </Grid>
         </Grid>
         
