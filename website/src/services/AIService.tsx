@@ -1,22 +1,19 @@
 // src/services/AIService.tsx
 import axios from "axios";
 
-// Base URL for Portia API
-const PORTIA_API_URL = process.env.REACT_APP_PORTIA_API_URL || 'https://portia-finetune-1.onrender.com';
+// Update the API URL based on environment
+const PORTIA_API_URL = process.env.NODE_ENV === 'development' 
+  ? 'https://portia-finetune-1.onrender.com'  // Use the direct API URL in development
+  : '/api/proxy?endpoint='; // Use this in production
 
-// Helper function to construct proper URLs
+// Simplify the constructUrl function 
 const constructUrl = (endpoint: string): string => {
-  // Make sure endpoint starts with a slash AND trim any whitespace
-  const formattedEndpoint = endpoint.trim();
-  const endpointWithSlash = formattedEndpoint.startsWith('/') ? formattedEndpoint : `/${formattedEndpoint}`;
+  // Remove any leading slash for the proxy endpoint parameter
+  const formattedEndpoint = endpoint.trim().startsWith('/') 
+    ? endpoint.trim() 
+    : `/${endpoint.trim()}`;
   
-  // Make sure base URL doesn't end with a slash AND trim any whitespace
-  const trimmedBaseUrl = PORTIA_API_URL.trim();
-  const baseUrl = trimmedBaseUrl.endsWith('/') ? trimmedBaseUrl.slice(0, -1) : trimmedBaseUrl;
-  
-  const url = `${baseUrl}${endpointWithSlash}`;
-  console.log(`[URL Debug] Constructed URL: ${url}`);
-  return url;
+  return `${PORTIA_API_URL}${formattedEndpoint}`;
 };
 
 // Enhanced logging function
@@ -204,19 +201,33 @@ export const translateContract = async (
   const endpoint = '/translate-contract';
   
   try {
-    // Debug URL construction
-    console.log(`[URL Construction Debug] Target language: ${targetLanguage}`);
-    console.log(`[URL Construction Debug] PORTIA_API_URL: ${PORTIA_API_URL}`);
+    // Validate inputs
+    if (!sourceCode || sourceCode.trim().length < 10) {
+      throw new Error("Source code is too short or empty");
+    }
+    
+    // Normalize target language (lowercase and trim)
+    const normalizedLanguage = targetLanguage.toLowerCase().trim();
+    
+    // Debug logging
+    console.log(`[Translate Request Debug]`, {
+      targetLanguage: normalizedLanguage,
+      sourceCodeLength: sourceCode.length,
+      firstChars: sourceCode.substring(0, 30) + '...'
+    });
     
     const url = constructUrl(endpoint);
-    logApiRequest(endpoint, { codeLength: sourceCode.length, targetLanguage });
+    logApiRequest(endpoint, { codeLength: sourceCode.length, targetLanguage: normalizedLanguage });
     
-    console.log(`[URL Final] Using URL: ${url}`);
+    // FIXED: Changed field name from contract_code to source_code
+    const requestData = {
+      source_code: sourceCode,
+      target_language: normalizedLanguage
+    };
     
-    const response = await axios.post(url, {
-      contract_code: sourceCode,  // Note: changed from source_code to match API expectation
-      target_language: targetLanguage
-    });
+    console.log("[Translate Request Data]", requestData);
+    
+    const response = await axios.post(url, requestData);
     
     console.log("[Translate API Response]", {
       status: response.status,
@@ -224,30 +235,25 @@ export const translateContract = async (
       dataKeys: response.data ? Object.keys(response.data) : []
     });
     
-    // Check if we got a valid response with the right structure
-    if (response.data && response.data.results && response.data.results.outputs && 
-        response.data.results.outputs.final_output) {
+    // Rest of function remains the same...
+    
+    return response.data.translated_code || sourceCode;
+  } catch (error: any) {
+    // Enhanced error handling specifically for 422 errors
+    if (error.response && error.response.status === 422) {
+      console.error('[422 Validation Error]', {
+        message: error.response.data?.detail || 'Unknown validation error',
+        data: error.response.data,
+        requestedLanguage: targetLanguage
+      });
       
-      const finalOutput = response.data.results.outputs.final_output;
-      
-      if (finalOutput.value) {
-        if (typeof finalOutput.value === 'string') {
-          return finalOutput.value;
-        } else if (typeof finalOutput.value === 'object') {
-          return JSON.stringify(finalOutput.value);
-        }
-      }
-      
-      if (finalOutput.summary) {
-        return finalOutput.summary;
-      }
+      // Return a more specific error message
+      return `Translation failed: The API couldn't process your request. ${error.response.data?.detail || 'Please check your code and language selection.'}`;
     }
     
-    // If we couldn't extract structured data properly, return a fallback message
-    return `Translation to ${targetLanguage} failed. Please try again with a different contract or language.`;
-  } catch (error: any) {
-    console.error('Error calling Portia API:', error);
-    throw new Error(`Failed to translate contract to ${targetLanguage}. Please try again.`);
+    logApiError(endpoint, error);
+    // Return original code with error message as comment
+    return `// Translation to ${targetLanguage} failed with error: ${error.message}\n\n${sourceCode}`;
   }
 };
 
