@@ -4,21 +4,33 @@ import axios from "axios";
 // Base URL for Portia API
 const PORTIA_API_URL = process.env.REACT_APP_PORTIA_API_URL || 'https://portia-finetune-1.onrender.com';
 
+// Helper function to construct proper URLs
+const constructUrl = (endpoint: string): string => {
+  // Make sure endpoint starts with a slash
+  const formattedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  
+  // Make sure base URL doesn't end with a slash
+  const baseUrl = PORTIA_API_URL.endsWith('/') ? PORTIA_API_URL.slice(0, -1) : PORTIA_API_URL;
+  
+  return `${baseUrl}${formattedEndpoint}`;
+};
+
 // Enhanced logging function
 const logApiRequest = (endpoint: string, data: any) => {
   console.log(`[API Request] ${endpoint}`, {
-    url: `${PORTIA_API_URL}${endpoint}`,
+    url: constructUrl(endpoint),
     environment: process.env.NODE_ENV,
     apiUrl: PORTIA_API_URL,
     dataSize: JSON.stringify(data).length,
     timestamp: new Date().toISOString()
   });
+  return constructUrl(endpoint);
 };
 
 // Enhanced error logging function
 const logApiError = (endpoint: string, error: any) => {
   console.error(`[API Error] ${endpoint}`, {
-    url: `${PORTIA_API_URL}${endpoint}`,
+    url: constructUrl(endpoint),
     environment: process.env.NODE_ENV,
     apiUrl: PORTIA_API_URL,
     error: {
@@ -42,7 +54,7 @@ export const analyzeContract = async (contractCode: string): Promise<any> => {
   
   try {
     console.time('analyzeContract');
-    const response = await axios.post(`${PORTIA_API_URL}${endpoint}`, {
+    const response = await axios.post(constructUrl(endpoint), {
       contract_code: contractCode
     });
     console.timeEnd('analyzeContract');
@@ -185,10 +197,13 @@ export const translateContract = async (
   sourceCode: string, 
   targetLanguage: string
 ): Promise<string> => {
+  const endpoint = '/translate-contract';
+  const url = logApiRequest(endpoint, { codeLength: sourceCode.length, targetLanguage });
+  
   try {
     console.log(`Translating to ${targetLanguage}, code length: ${sourceCode.length}`);
     
-    const response = await axios.post(`${PORTIA_API_URL}/translate-contract`, {
+    const response = await axios.post(url, {
       source_code: sourceCode,
       target_language: targetLanguage
     });
@@ -223,108 +238,114 @@ export const translateContract = async (
 };
 
 export const assessInsurance = async (
-    contractCode: string, 
-    tvl: number
-  ): Promise<any> => {
-    try {
-      const response = await axios.post(`${PORTIA_API_URL}/assess-insurance`, {
-        contract_code: contractCode,
-        tvl: tvl
-      });
-      
-      // Check for structured data in the response
-      if (response.data && response.data.results && response.data.results.outputs && 
-          response.data.results.outputs.final_output) {
+  contractCode: string, 
+  tvl: number
+): Promise<any> => {
+  const endpoint = '/assess-insurance';
+  const url = logApiRequest(endpoint, { contractCodeLength: contractCode.length, tvl });
+  
+  try {
+    const response = await axios.post(url, {
+      contract_code: contractCode,
+      tvl: tvl
+    });
+    
+    // Check for structured data in the response
+    if (response.data && response.data.results && response.data.results.outputs && 
+        response.data.results.outputs.final_output) {
             
-        const finalOutput = response.data.results.outputs.final_output;
+      const finalOutput = response.data.results.outputs.final_output;
+      
+      if (finalOutput.value) {
+        if (typeof finalOutput.value === 'object' && finalOutput.value.risk_score) {
+          return finalOutput.value;
+        }
         
-        if (finalOutput.value) {
-          if (typeof finalOutput.value === 'object' && finalOutput.value.risk_score) {
-            return finalOutput.value;
-          }
-          
-          if (typeof finalOutput.value === 'string') {
-            try {
-              const jsonMatch = finalOutput.value.match(/```json\n([\s\S]*?)\n```/) || 
-                               finalOutput.value.match(/```\n([\s\S]*?)\n```/) || 
-                               finalOutput.value.match(/{[\s\S]*?}/);
-                              
-              if (jsonMatch) {
-                const jsonStr = jsonMatch[0].replace(/```json\n|```\n|```/g, '');
-                return JSON.parse(jsonStr);
-              }
-            } catch (e) {
-              console.error("Failed to parse JSON from API response:", e);
+        if (typeof finalOutput.value === 'string') {
+          try {
+            const jsonMatch = finalOutput.value.match(/```json\n([\s\S]*?)\n```/) || 
+                             finalOutput.value.match(/```\n([\s\S]*?)\n```/) || 
+                             finalOutput.value.match(/{[\s\S]*?}/);
+                            
+            if (jsonMatch) {
+              const jsonStr = jsonMatch[0].replace(/```json\n|```\n|```/g, '');
+              return JSON.parse(jsonStr);
             }
+          } catch (e) {
+            console.error("Failed to parse JSON from API response:", e);
           }
         }
       }
-      
-      // Generate dynamic fallback values based on the TVL
-      const calculateFallbackValues = (tvl: number) => {
-        // Risk score calculation based on TVL
-        const riskScore = Math.min(Math.max(40 + Math.log10(tvl) * 5, 40), 80);
-        
-        // Premium percentage - higher TVL means slightly lower percentage (economies of scale)
-        const premiumPercentage = 7 - Math.min(Math.log10(tvl), 5);
-        
-        // Coverage limit as a percentage of TVL, bigger TVL gets lower percentage coverage
-        const coveragePercentage = 0.9 - (Math.log10(tvl) * 0.01);
-        const coverageLimit = `$${Math.floor(tvl * coveragePercentage).toLocaleString()}`;
-        
-        // Risk level based on calculated risk score
-        const riskLevel = riskScore > 70 ? "High" : riskScore > 50 ? "Medium" : "Low";
-        
-        // Generate dynamic risk factors based on TVL and risk level
-        const riskFactors = [
-          `Contract handles significant value (${tvl.toLocaleString()} TVL)`,
-          riskLevel === "High" ? "Potential for complex reentrancy attacks" : 
-            "Standard validation of external calls required",
-          tvl > 1000000 ? "High-value target for attackers" : "Moderate-value target for attackers"
-        ];
-        
-        // Generate dynamic policy recommendations
-        const policyRecommendations = [
-          `Standard coverage with ${premiumPercentage.toFixed(1)}% premium rate`,
-          tvl > 5000000 ? "Consider multi-signature security controls" : 
-            "Regular security audits recommended",
-          `Coverage up to ${coverageLimit} with standard deductible`
-        ];
-        
-        // Generate exclusions
-        const exclusions = [
-          "Intentionally introduced vulnerabilities",
-          "Social engineering attacks",
-          tvl > 1000000 ? "Flash loan attack vectors not properly mitigated" : 
-            "Basic validation failures"
-        ];
-        
-        return {
-          risk_score: Math.round(riskScore),
-          premium_percentage: parseFloat(premiumPercentage.toFixed(1)),
-          coverage_limit: coverageLimit,
-          risk_factors: riskFactors,
-          risk_level: riskLevel,
-          policy_recommendations: policyRecommendations,
-          exclusions: exclusions
-        };
-      };
-      
-      // Return the dynamically generated fallback
-      return calculateFallbackValues(tvl);
-      
-    } catch (error: any) {
-      console.error('Error calling Portia API:', error);
-      throw new Error('Failed to assess insurance risk. Please try again.');
     }
-  };
+    
+    // Generate dynamic fallback values based on the TVL
+    const calculateFallbackValues = (tvl: number) => {
+      // Risk score calculation based on TVL
+      const riskScore = Math.min(Math.max(40 + Math.log10(tvl) * 5, 40), 80);
+      
+      // Premium percentage - higher TVL means slightly lower percentage (economies of scale)
+      const premiumPercentage = 7 - Math.min(Math.log10(tvl), 5);
+      
+      // Coverage limit as a percentage of TVL, bigger TVL gets lower percentage coverage
+      const coveragePercentage = 0.9 - (Math.log10(tvl) * 0.01);
+      const coverageLimit = `$${Math.floor(tvl * coveragePercentage).toLocaleString()}`;
+      
+      // Risk level based on calculated risk score
+      const riskLevel = riskScore > 70 ? "High" : riskScore > 50 ? "Medium" : "Low";
+      
+      // Generate dynamic risk factors based on TVL and risk level
+      const riskFactors = [
+        `Contract handles significant value (${tvl.toLocaleString()} TVL)`,
+        riskLevel === "High" ? "Potential for complex reentrancy attacks" : 
+          "Standard validation of external calls required",
+        tvl > 1000000 ? "High-value target for attackers" : "Moderate-value target for attackers"
+      ];
+      
+      // Generate dynamic policy recommendations
+      const policyRecommendations = [
+        `Standard coverage with ${premiumPercentage.toFixed(1)}% premium rate`,
+        tvl > 5000000 ? "Consider multi-signature security controls" : 
+          "Regular security audits recommended",
+        `Coverage up to ${coverageLimit} with standard deductible`
+      ];
+      
+      // Generate exclusions
+      const exclusions = [
+        "Intentionally introduced vulnerabilities",
+        "Social engineering attacks",
+        tvl > 1000000 ? "Flash loan attack vectors not properly mitigated" : 
+          "Basic validation failures"
+      ];
+      
+      return {
+        risk_score: Math.round(riskScore),
+        premium_percentage: parseFloat(premiumPercentage.toFixed(1)),
+        coverage_limit: coverageLimit,
+        risk_factors: riskFactors,
+        risk_level: riskLevel,
+        policy_recommendations: policyRecommendations,
+        exclusions: exclusions
+      };
+    };
+    
+    // Return the dynamically generated fallback
+    return calculateFallbackValues(tvl);
+    
+  } catch (error: any) {
+    console.error('Error calling Portia API:', error);
+    throw new Error('Failed to assess insurance risk. Please try again.');
+  }
+};
 
 export const generateCoinRecommendation = async (
   contractCode: string,
   analysis: any
 ): Promise<any> => {
+  const endpoint = '/generate-recommendation';
+  const url = logApiRequest(endpoint, { contractCodeLength: contractCode.length });
+  
   try {
-    const response = await axios.post(`${PORTIA_API_URL}/generate-recommendation`, {
+    const response = await axios.post(url, {
       contract_code: contractCode,
       analysis: analysis
     });
